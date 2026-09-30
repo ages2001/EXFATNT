@@ -95,7 +95,7 @@ Needs Visual C++ 4.x, the Windows NT 4.0 DDK and the free `ntifs.h` (release 58)
 
 The same binary is meant for NT 3.51 and 4.0: it only imports kernel functions NT 3.51 already exports, and the 64-bit arithmetic helpers NT 3.51 lacks are linked in from `libcntpr.lib`. It has been tested on NT 3.51.
 
-### Windows 2000
+### Windows 2000 and XP x86
 
 Needs WDK 6001.18002 (the Windows Server 2008 WDK).
 
