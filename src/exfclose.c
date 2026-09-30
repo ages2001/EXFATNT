@@ -585,8 +585,16 @@ ExfCommonClose (
             Item->Fcb = Fcb;
             Item->Ccb = Ccb;
 
+            /* Deprecated in the WDK, but the only work queue NT 3.51/4.0 have */
+#if defined(_MSC_VER) && _MSC_VER >= 1300
+#pragma warning(push)
+#pragma warning(disable: 4995 4996)
+#endif
             ExInitializeWorkItem(&Item->Item, ExfCloseWorker, Item);
             ExQueueWorkItem(&Item->Item, DelayedWorkQueue);
+#if defined(_MSC_VER) && _MSC_VER >= 1300
+#pragma warning(pop)
+#endif
 
             return STATUS_SUCCESS;
         }

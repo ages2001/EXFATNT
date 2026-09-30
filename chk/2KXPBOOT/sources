@@ -6,7 +6,11 @@ TARGETTYPE=PROGRAM
 INCLUDES=..;..\..\fmt
 
 UMTYPE=nt
+!if "$(_BUILDARCH)" == "AMD64"
+UMENTRYABS=NtProcessStartup
+!else
 UMENTRYABS=NtProcessStartup@4
+!endif
 USE_NOLIBS=1
 
 # No C library: no security cookie either

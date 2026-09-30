@@ -1,8 +1,8 @@
 /*
- * EXFATNT - exFAT file system driver for Windows NT 3.51, 4.0 and 2000
+ * EXFATNT - exFAT file system driver for Windows NT 3.51, 4.0, 2000 and XP
  *
  *   EXF_NT4   Windows NT 3.51 and 4.0 (NT4 DDK + free ntifs.h, see src\NT\build.bat)
- *   (none)    Windows 2000 and later, x86 (WDK 6001, W2K environment)
+ *   (none)    Windows 2000 and XP, x86 and amd64 (WDK 6001, src\2KXP)
  */
 
 #ifndef _EXFAT_H_
@@ -172,7 +172,7 @@ typedef struct _EXF_FILE_FS_FULL_SIZE_INFORMATION {
 #define EXF_TAG_REGISTRY        'GfxE'
 
 #define EXF_MAP_UNIT            0x1000      /* CcMapData / CcPinRead granule */
-#define EXF_PAGE_SIZE           0x1000      /* x86 */
+#define EXF_PAGE_SIZE           0x1000      /* x86 and amd64 */
 #define EXF_ZERO_CHUNK          0x10000     /* zero buffer for disk writes */
 
 /* ------------------------------------------------------------------ */

@@ -1,6 +1,6 @@
-# EXFATNT - exFAT File System Driver for Windows NT 3.51, NT 4.0, Windows 2000 and XP x86
+# EXFATNT - exFAT File System Driver for Windows NT 3.51, NT 4.0, Windows 2000 and XP (x86 and x64)
 
-An installable file system (IFS) driver that lets Windows NT 3.51, NT 4.0 and Windows 2000 mount exFAT volumes, the format of SDXC cards and most large USB flash drives. Microsoft only ever brought exFAT back as far as Windows XP / Server 2003 (KB955704).
+An installable file system (IFS) driver that lets Windows NT 3.51, NT 4.0, Windows 2000 and Windows XP before SP2 (x86 and x64) mount exFAT volumes, the format of SDXC cards and most large USB flash drives. Microsoft only ever brought exFAT back as far as Windows XP / Server 2003 (KB955704).
 
 ## Status
 
@@ -30,14 +30,15 @@ Three tools come with it: `exfmt.exe` formats a volume as exFAT, `exfatchk.exe` 
   - Volume lock/unlock/dismount, so `exfmt`, `format` and disk tools can take the volume over; after a dismount with files still open, the next open mounts the volume again
   - Media change verification; removable and hot-plug media are written back when the last file closes
   - Write-protected media and TexFAT volumes are mounted read-only
-  - Plug and Play removal on Windows 2000 (query-remove, surprise removal)
-- **Tools** for NT 3.51, NT 4.0 and 2000 (see below)
+  - Plug and Play removal on Windows 2000 and XP (query-remove, surprise removal)
+- **Tools** for NT 3.51, NT 4.0, 2000 and XP (see below)
   - `exfmt.exe`: format
   - `exfatchk.exe`: check and repair, like `chkdsk`
   - `exfachk.exe`: the boot-time check, like `autochk`; only volumes marked dirty are checked
-- **One source tree, two binaries**
+- **One source tree, three binaries**
   - Windows NT 3.51 / NT 4.0 (x86): `exfatnt.sys` built with `EXF_NT4`
-  - Windows 2000 and later (x86): `exfatnt.sys` built without it
+  - Windows 2000 and XP (x86): `exfatnt.sys` built without it
+  - Windows XP x64 (amd64): the same sources, built for amd64
 
 ## Architecture
 
@@ -78,9 +79,9 @@ Locks are taken in one order: volume, file (deepest first), file paging I/O, all
 - **src\exffast.c** – Fast I/O and Cache Manager callbacks
 - **src\exfmisc.c** – Device control pass-through, byte-range locks
 - **src\NT\** – `build.bat` for Windows NT 3.51 and 4.0
-- **src\2K\** – `sources`, `makefile`, `exfatnt.rc` for the WDK
-- **chk\** – `exfatchk.exe` and `exfachk.exe`: `exfchkc.c` checks and repairs (`exfupcw.c` brings in the up-case table of `fmt\`), `exfatchk.c` is the Windows front end, `exfachk.c` the native boot-time one; `NT\build.bat`, `2K\sources` and `2KBOOT\sources` build them
-- **fmt\** – `exfmt.exe`: `exfmtc.c` lays out and writes the volume, `exfupc.c` holds the up-case table, `exfmt.c` is the Windows front end; `NT\build.bat` and `2K\sources` build it
+- **src\2KXP\** – `sources`, `makefile`, `exfatnt.rc` for the WDK (x86 and amd64)
+- **chk\** – `exfatchk.exe` and `exfachk.exe`: `exfchkc.c` checks and repairs (`exfupcw.c` brings in the up-case table of `fmt\`), `exfatchk.c` is the Windows front end, `exfachk.c` the native boot-time one; `NT\build.bat`, `2KXP\sources` and `2KXPBOOT\sources` build them
+- **fmt\** – `exfmt.exe`: `exfmtc.c` lays out and writes the volume, `exfupc.c` holds the up-case table, `exfmt.c` is the Windows front end; `NT\build.bat` and `2KXP\sources` build it
 - **bin\exfatnt.reg** – Service registration
 - **test\** – User-mode test run (Linux)
 
@@ -95,22 +96,26 @@ Needs Visual C++ 4.x, the Windows NT 4.0 DDK and the free `ntifs.h` (release 58)
 
 The same binary is meant for NT 3.51 and 4.0: it only imports kernel functions NT 3.51 already exports, and the 64-bit arithmetic helpers NT 3.51 lacks are linked in from `libcntpr.lib`. It has been tested on NT 3.51.
 
-### Windows 2000 and XP x86
+### Windows 2000 and XP (x86 and x64)
 
 Needs WDK 6001.18002 (the Windows Server 2008 WDK).
 
 1. Open the **Windows 2000 Free Build Environment** (or Checked, for debug output).
-2. `cd src\2K`
+2. `cd src\2KXP`
 3. `build -cZ`
 
 The Windows 2000 binary also runs on Windows XP; see Installing for which XP versions need it.
 
+For XP x64, open the **Windows Server 2003 x64 Free Build Environment** (or Checked) instead and run `build -cZ` in the same folder; the result is in `objfre_wnet_amd64\amd64` (or `objchk_...`).
+
 ### The tools
 
 - **With Visual C++ 4.x** (runs on NT 3.51, NT 4.0, 2000 and later): adjust `MSVCDIR` in `fmt\NT\build.bat` and run it in `fmt\NT\`. No DDK needed.
-- **With the WDK** (runs on 2000 and later): in the Windows 2000 build environment, `cd fmt\2K` and `build -cZ`. It uses the system `msvcrt.dll`, since the WDK's static C library needs functions Windows 2000 does not have.
+- **With the WDK** (runs on 2000 and later): in the Windows 2000 build environment, `cd fmt\2KXP` and `build -cZ`. It uses the system `msvcrt.dll`, since the WDK's static C library needs functions Windows 2000 does not have.
 
-`exfatchk.exe` and `exfachk.exe` are built the same way from `chk\`: `chk\NT\build.bat` builds both (it also needs the NT4 DDK for `ntdll.lib` and `libcntpr.lib`, because `exfachk.exe` is a native application without a C library), and with the WDK `chk\2K` builds `exfatchk.exe` and `chk\2KBOOT` builds `exfachk.exe`. The NT 4.0 builds of all three tools also run on 2000 and XP.
+`exfatchk.exe` and `exfachk.exe` are built the same way from `chk\`: `chk\NT\build.bat` builds both (it also needs the NT4 DDK for `ntdll.lib` and `libcntpr.lib`, because `exfachk.exe` is a native application without a C library), and with the WDK `chk\2KXP` builds `exfatchk.exe` and `chk\2KXPBOOT` builds `exfachk.exe`. The NT 4.0 builds of all three tools also run on 2000 and XP.
+
+On XP x64, use x64 builds of the tools: a 32-bit native `exfachk.exe` cannot run at boot there, and a 32-bit `exfatchk /INSTALL` refuses to install. Build `fmt\2KXP`, `chk\2KXP` and `chk\2KXPBOOT` in the Windows Server 2003 x64 build environment; these x64 tool builds have not been tried yet.
 
 ## Installing
 
@@ -119,9 +124,10 @@ The Windows 2000 binary also runs on Windows XP; see Installing for which XP ver
 | System | What to use |
 |---|---|
 | Windows NT 3.51, NT 4.0 | `exfatnt.sys` from `src\NT` |
-| Windows 2000 | `exfatnt.sys` from `src\2K` |
-| Windows XP without a service pack or with SP1 | `exfatnt.sys` from `src\2K` |
-| Windows XP SP2 and later | Not needed: install Microsoft's own exFAT update (KB955704) |
+| Windows 2000 | `exfatnt.sys` from `src\2KXP` (x86) |
+| Windows XP without a service pack or with SP1 | `exfatnt.sys` from `src\2KXP` (x86) |
+| Windows XP x64 without SP2 | `exfatnt.sys` from `src\2KXP` (amd64) |
+| Windows XP SP2 and later, x86 or x64 | Not needed: install Microsoft's own exFAT update (KB955704) |
 
 Do not run EXFATNT and Microsoft's exFAT driver on the same system.
 

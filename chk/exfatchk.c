@@ -118,6 +118,16 @@ static void HostPrint(void *Context, const EXU16 *Text, EXU32 Length)
 #define SESSION_KEY "SYSTEM\\CurrentControlSet\\Control\\Session Manager"
 #define BOOT_ENTRY  L"autocheck exfachk *"
 
+/* A 32-bit program on 64-bit Windows (IsWow64Process: XP SP2, x64 and later) */
+static int UnderWow64(void)
+{
+    typedef BOOL (WINAPI *ISWOW64)(HANDLE, BOOL *);
+    ISWOW64 IsWow64 = (ISWOW64)GetProcAddress(GetModuleHandleA("kernel32.dll"), "IsWow64Process");
+    BOOL Wow = FALSE;
+
+    return IsWow64 != NULL && IsWow64(GetCurrentProcess(), &Wow) && Wow;
+}
+
 static int Install(int Add)
 {
     HKEY Key;
@@ -126,6 +136,12 @@ static int Install(int Add)
     char Here[MAX_PATH], To[MAX_PATH], *Slash;
     int Found = 0;
     LONG Error;
+
+    if (Add && UnderWow64()) {
+        /* System32 would be redirected and a 32-bit native program cannot run */
+        printf("On 64-bit Windows use the x64 build of exfatchk.exe and exfachk.exe.\n");
+        return 1;
+    }
 
     if (Add) {
         /* exfachk.exe comes from next to this program */

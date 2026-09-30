@@ -77,7 +77,8 @@ typedef struct _DRIVE_LAYOUT_INFORMATION {
     PARTITION_INFORMATION PartitionEntry[1];
 } DRIVE_LAYOUT_INFORMATION;
 
-/* The parts of the PEB and the process parameters used here (x86) */
+/* The parts of the PEB and the process parameters used here; the
+   pointer-sized fields give the right offsets on x86 and amd64 alike */
 typedef struct _PROCESS_PARAMETERS {
     ULONG MaximumLength;
     ULONG Length;

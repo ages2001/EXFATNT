@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 
-# Build output (NT: build.bat, 2K: BUILD)
+# Build output (NT: build.bat, 2KXP: BUILD)
 *.obj
 *.pdb
 *.sys

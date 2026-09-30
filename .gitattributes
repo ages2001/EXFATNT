@@ -15,7 +15,7 @@
 *.H        text eol=crlf diff=cpp
 *.py       text eol=crlf diff=python
 
-# Build files (NT: build.bat; 2K: sources, makefile, exfatnt.rc)
+# Build files (NT: build.bat; 2KXP: sources, makefile, exfatnt.rc)
 *.bat      text eol=crlf
 *.BAT      text eol=crlf
 makefile   text eol=crlf
