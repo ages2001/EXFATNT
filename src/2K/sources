@@ -1,0 +1,39 @@
+TARGETNAME=exfatnt
+TARGETPATH=obj
+TARGETTYPE=DRIVER
+
+# Shared sources live one level up (src\); no target define = 2000 and later
+INCLUDES=..
+
+TARGETLIBS=$(DDK_LIB_PATH)\ntoskrnl.lib \
+           $(DDK_LIB_PATH)\hal.lib
+
+MSC_WARNING_LEVEL=/W3
+_NT_TARGET_VERSION=$(_NT_TARGET_VERSION_WIN2K)
+
+MUI=0
+MUI_COMMENT=0
+
+# Left on: the SEH support (sehupd.lib) needs __security_cookie from
+# BufferOverflowK.lib, which the WDK only links with /GS enabled
+
+SOURCES=..\exfalloc.c \
+        ..\exfclose.c \
+        ..\exfcreat.c \
+        ..\exfdir.c \
+        ..\exfdirw.c \
+        ..\exfdisp.c \
+        ..\exffast.c \
+        ..\exfflush.c \
+        ..\exffsctl.c \
+        ..\exfinfo.c \
+        ..\exfinit.c \
+        ..\exfio.c \
+        ..\exfmisc.c \
+        ..\exfread.c \
+        ..\exfsetin.c \
+        ..\exfstruc.c \
+        ..\exfsup.c \
+        ..\exfvol.c \
+        ..\exfwrite.c \
+        exfatnt.rc

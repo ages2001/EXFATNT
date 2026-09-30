@@ -1,0 +1,22 @@
+TARGETNAME=exfmt
+TARGETPATH=obj
+TARGETTYPE=PROGRAM
+
+# Shared sources live one level up (fmt\)
+INCLUDES=..
+
+UMTYPE=console
+UMENTRY=main
+
+# The system msvcrt.dll: the WDK's static CRT needs functions Windows 2000 lacks
+USE_MSVCRT=1
+
+TARGETLIBS=$(SDK_LIB_PATH)\kernel32.lib
+
+MSC_WARNING_LEVEL=/W3
+_NT_TARGET_VERSION=$(_NT_TARGET_VERSION_WIN2K)
+
+SOURCES=..\exfmt.c \
+        ..\exfmtc.c \
+        ..\exfupc.c \
+        exfmt.rc

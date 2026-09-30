@@ -1,0 +1,23 @@
+TARGETNAME=exfatchk
+TARGETPATH=obj
+TARGETTYPE=PROGRAM
+
+# Shared sources live one level up (chk\) and in fmt\
+INCLUDES=..;..\..\fmt
+
+UMTYPE=console
+UMENTRY=main
+
+# The system msvcrt.dll: the WDK's static CRT needs functions Windows 2000 lacks
+USE_MSVCRT=1
+
+TARGETLIBS=$(SDK_LIB_PATH)\kernel32.lib \
+           $(SDK_LIB_PATH)\advapi32.lib
+
+MSC_WARNING_LEVEL=/W3
+_NT_TARGET_VERSION=$(_NT_TARGET_VERSION_WIN2K)
+
+SOURCES=..\exfatchk.c \
+        ..\exfchkc.c \
+        ..\exfupcw.c \
+        exfatchk.rc

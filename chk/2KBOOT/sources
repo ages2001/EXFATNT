@@ -1,0 +1,24 @@
+TARGETNAME=exfachk
+TARGETPATH=obj
+TARGETTYPE=PROGRAM
+
+# The boot-time checker: a native application, only ntdll.dll
+INCLUDES=..;..\..\fmt
+
+UMTYPE=nt
+UMENTRYABS=NtProcessStartup@4
+USE_NOLIBS=1
+
+# No C library: no security cookie either
+BUFFER_OVERFLOW_CHECKS=0
+
+TARGETLIBS=$(SDK_LIB_PATH)\ntdll.lib \
+           $(DDK_LIB_PATH)\libcntpr.lib
+
+MSC_WARNING_LEVEL=/W3
+_NT_TARGET_VERSION=$(_NT_TARGET_VERSION_WIN2K)
+
+SOURCES=..\exfachk.c \
+        ..\exfchkc.c \
+        ..\exfupcw.c \
+        exfachk.rc

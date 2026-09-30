@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+
+# Build output (NT: build.bat, 2K: BUILD)
+*.obj
+*.pdb
+*.sys
+*.exe
+*.res
+*.lib
+*.exp
+*.map
+*.ilk
+objchk*/
+objfre*/
+build*.log
+build*.err
+build*.wrn
+*.img
