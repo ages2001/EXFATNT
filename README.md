@@ -1,10 +1,10 @@
-# EXFATNT - exFAT File System Driver for Windows NT 3.51, NT 4.0 and Windows 2000
+# EXFATNT - exFAT File System Driver for Windows NT 3.51, NT 4.0, Windows 2000 and XP x86
 
 An installable file system (IFS) driver that lets Windows NT 3.51, NT 4.0 and Windows 2000 mount exFAT volumes, the format of SDXC cards and most large USB flash drives. Microsoft only ever brought exFAT back as far as Windows XP / Server 2003 (KB955704).
 
 ## Status
 
-**Stage 2: read/write.** Files and directories can be created, written, extended, truncated, renamed, moved and deleted; attributes, times and the volume label can be changed. Memory-mapped writes, the fast I/O write path and write-through work. Writing can be turned off in the registry (`EnableWriteSupport`).
+Files and directories can be created, written, extended, truncated, renamed, moved and deleted; attributes, times and the volume label can be changed. Memory-mapped writes, the fast I/O write path and write-through work. Writing can be turned off in the registry (`EnableWriteSupport`).
 
 Three tools come with it: `exfmt.exe` formats a volume as exFAT, `exfatchk.exe` checks and repairs one, and `exfachk.exe` does the same at boot time for volumes left dirty.
 
@@ -93,7 +93,7 @@ Needs Visual C++ 4.x, the Windows NT 4.0 DDK and the free `ntifs.h` (release 58)
 1. Adjust `MSVCDIR` and `DDKDIR` at the top of `src\NT\build.bat`.
 2. Run `build.bat` in `src\NT\`.
 
-The same binary is meant for NT 3.51 and 4.0: it only imports kernel functions NT 3.51 already exports, and the 64-bit arithmetic helpers NT 3.51 lacks are linked in from `libcntpr.lib`. It has not been tried on NT 3.51 yet.
+The same binary is meant for NT 3.51 and 4.0: it only imports kernel functions NT 3.51 already exports, and the 64-bit arithmetic helpers NT 3.51 lacks are linked in from `libcntpr.lib`. It has been tested on NT 3.51.
 
 ### Windows 2000
 
@@ -103,7 +103,7 @@ Needs WDK 6001.18002 (the Windows Server 2008 WDK).
 2. `cd src\2K`
 3. `build -cZ`
 
-The Windows 2000 binary also runs on XP and Server 2003 (x86), which already have exFAT through KB955704; do not run both drivers on the same system.
+The Windows 2000 binary also runs on Windows XP; see Installing for which XP versions need it.
 
 ### The tools
 
@@ -113,6 +113,21 @@ The Windows 2000 binary also runs on XP and Server 2003 (x86), which already hav
 `exfatchk.exe` and `exfachk.exe` are built the same way from `chk\`: `chk\NT\build.bat` builds both (it also needs the NT4 DDK for `ntdll.lib` and `libcntpr.lib`, because `exfachk.exe` is a native application without a C library), and with the WDK `chk\2K` builds `exfatchk.exe` and `chk\2KBOOT` builds `exfachk.exe`. The NT 4.0 builds of all three tools also run on 2000 and XP.
 
 ## Installing
+
+### Which systems
+
+| System | What to use |
+|---|---|
+| Windows NT 3.51, NT 4.0 | `exfatnt.sys` from `src\NT` |
+| Windows 2000 | `exfatnt.sys` from `src\2K` |
+| Windows XP without a service pack or with SP1 | `exfatnt.sys` from `src\2K` |
+| Windows XP SP2 and later | Not needed: install Microsoft's own exFAT update (KB955704) |
+
+Do not run EXFATNT and Microsoft's exFAT driver on the same system.
+
+**Service packs:** if the driver does not work on NT 3.51, NT 4.0 or 2000 without the latest service pack (NT 3.51 SP5, NT 4.0 SP6a, 2000 SP4), install that service pack and try again.
+
+### Steps
 
 1. Copy `exfatnt.sys` to `%SystemRoot%\System32\drivers`.
 2. Import `bin\exfatnt.reg` (double-click it, or `regedit /s exfatnt.reg`).
