@@ -1,6 +1,6 @@
-# EXFATNT - exFAT File System Driver for Windows NT 3.1, 3.51, 4.0, Windows 2000 and XP (x86 and x64)
+# EXFATNT - exFAT File System Driver for Windows NT 3.1, 3.50, 3.51, 4.0, Windows 2000 and XP (x86 and x64)
 
-An installable file system (IFS) driver that lets Windows NT 3.1, NT 3.51, NT 4.0, Windows 2000 and Windows XP before SP2 (x86 and x64) mount exFAT volumes, the format of SDXC cards and most large USB flash drives. Microsoft only ever brought exFAT back as far as Windows XP / Server 2003 (KB955704).
+An installable file system (IFS) driver that lets Windows NT 3.1, NT 3.5, NT 3.51, NT 4.0, Windows 2000 and Windows XP before SP2 (x86 and x64) mount exFAT volumes, the format of SDXC cards and most large USB flash drives. Microsoft only ever brought exFAT back as far as Windows XP / Server 2003 (KB955704).
 
 ## Status
 
@@ -83,7 +83,7 @@ Locks are taken in one order: volume, file (deepest first), file paging I/O, all
 - **chk\** – `exfatchk.exe` and `exfachk.exe`: `exfchkc.c` checks and repairs (`exfupcw.c` brings in the up-case table of `fmt\`), `exfatchk.c` is the Windows front end, `exfachk.c` the native boot-time one; `NT\build.bat`, `2KXP\sources` and `2KXPBOOT\sources` build them
 - **fmt\** – `exfmt.exe`: `exfmtc.c` lays out and writes the volume, `exfupc.c` holds the up-case table, `exfmt.c` is the Windows front end; `NT\build.bat` and `2KXP\sources` build it
 - **inst\** – `exfinst.exe`, the setup program (copies the driver and the tools, registers the driver); `NT\build.bat` and `2KXP\sources` build it
-- **fmt\exfcrt.c** – The few C library routines the tools use, on kernel32 only, for the Visual C++ 4.x builds that also run on NT 3.1
+- **fmt\exfcrt.c** – The few C library routines the tools use, on kernel32 only, for the Visual C++ 4.x builds that also run on NT 3.1 and 3.5
 - **bin\exfatnt.reg** – Service registration, for installing by hand
 - **test\** – User-mode test run (Linux)
 
@@ -98,11 +98,11 @@ Needs Visual C++ 4.x, the Windows NT 4.0 DDK and the free `ntifs.h` (release 58)
 
 The same binary is meant for NT 3.51 and 4.0: it only imports kernel functions NT 3.51 already exports, and the 64-bit arithmetic helpers NT 3.51 lacks are linked in from `libcntpr.lib`. It has been tested on NT 3.51.
 
-### Windows NT 3.1
+### Windows NT 3.1 and 3.5
 
-The same tools as for NT 3.51/4.0 (Visual C++ 4.x, the NT4 DDK, `src\NT\ntifs.h`); the NT 3.1 DDK is not needed. Adjust `MSVCDIR` and `DDKDIR` in `src\NT31\build.bat` and run it in `src\NT31\`.
+The same tools as for NT 3.51/4.0 (Visual C++ 4.x, the NT4 DDK, `src\NT\ntifs.h`); the NT 3.1 DDK is not needed. Adjust `MSVCDIR` and `DDKDIR` in `src\NT31\build.bat` and run it in `src\NT31\`. The same driver is used on NT 3.1 and NT 3.5.
 
-This builds with `EXF_NT31` (see `src\exfnt31.h`): NT 3.1's original executive resources, untagged pool, fast I/O routines without the DeviceObject argument, and the thread fields NT 3.1 has no routines for, whose offsets the driver reads from the kernel when it loads (it refuses to load on any other kernel). Directory change notification is not offered on NT 3.1, and after a media change or a dismount the first open fails and the next one mounts the volume again.
+This builds with `EXF_NT31` (see `src\exfnt31.h`): NT 3.1's original executive resources, untagged pool, fast I/O routines without the DeviceObject argument, and the thread fields NT 3.1 has no routines for, whose offsets the driver reads from the kernel when it loads (it refuses to load on a kernel where they cannot be found). Directory change notification is not offered by this build, and after a media change or a dismount the first open fails and the next one mounts the volume again.
 
 The `-release` link option writes the image checksum: NT 3.1 refuses to load a system-start driver without a valid one (STOP c0000221).
 
@@ -126,7 +126,7 @@ For XP x64, open the **Windows Server 2003 x64 Free Build Environment** (or Chec
 
 ### The tools
 
-- **With Visual C++ 4.x** (runs on NT 3.1, NT 3.51, NT 4.0, 2000 and later): adjust `MSVCDIR` in `fmt\NT\build.bat` and run it in `fmt\NT\`. No DDK needed. These builds do not use the Visual C++ C library, whose start-up code needs kernel32 routines NT 3.1 lacks: `fmt\exfcrt.c` provides the few routines the tools use (`-DEXF_OWN_CRT`), and `libc.lib` is linked only for the compiler's 64-bit arithmetic helpers.
+- **With Visual C++ 4.x** (runs on NT 3.1, NT 3.5, NT 3.51, NT 4.0, 2000 and later): adjust `MSVCDIR` in `fmt\NT\build.bat` and run it in `fmt\NT\`. No DDK needed. These builds do not use the Visual C++ C library, whose start-up code needs kernel32 routines NT 3.1 lacks: `fmt\exfcrt.c` provides the few routines the tools use (`-DEXF_OWN_CRT`), and `libc.lib` is linked only for the compiler's 64-bit arithmetic helpers.
 - **With the WDK** (runs on 2000 and later): in the Windows 2000 build environment, `cd fmt\2KXP` and `build -cZ`. It uses the system `msvcrt.dll`, since the WDK's static C library needs functions Windows 2000 does not have.
 
 `exfinst.exe` is built the same way from `inst\` (`inst\NT\build.bat`, or `inst\2KXP` with the WDK).
@@ -141,7 +141,7 @@ On XP x64, use x64 builds of the tools: a 32-bit native `exfachk.exe` cannot run
 
 | System | What to use |
 |---|---|
-| Windows NT 3.1 | `exfatnt.sys` from `src\NT31` |
+| Windows NT 3.1, NT 3.5 | `exfatnt.sys` from `src\NT31` |
 | Windows NT 3.51, NT 4.0 | `exfatnt.sys` from `src\NT` |
 | Windows 2000 | `exfatnt.sys` from `src\2KXP` (x86) |
 | Windows XP without a service pack or with SP1 | `exfatnt.sys` from `src\2KXP` (x86) |
