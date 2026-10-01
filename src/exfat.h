@@ -1,6 +1,7 @@
 /*
  * EXFATNT - exFAT file system driver for Windows NT 3.51, 4.0, 2000 and XP
  *
+ *   EXF_NT31  Windows NT 3.1 (as EXF_NT4, plus exfnt31.h; see src\NT31\build.bat)
  *   EXF_NT4   Windows NT 3.51 and 4.0 (NT4 DDK + free ntifs.h, see src\NT\build.bat)
  *   (none)    Windows 2000 and XP, x86 and amd64 (WDK 6001, src\2KXP)
  */
@@ -8,8 +9,23 @@
 #ifndef _EXFAT_H_
 #define _EXFAT_H_
 
+/* NT 3.1 is built as NT 3.51/4.0, with exfnt31.h on top */
+#if defined(EXF_NT31) && !defined(EXF_NT4)
+#define EXF_NT4
+#endif
+
 #include <ntifs.h>
 #include <ntdddisk.h>
+
+#ifdef EXF_NT31
+#include "exfnt31.h"
+#else
+typedef ERESOURCE EXF_ERESOURCE, *PEXF_ERESOURCE;
+#define ExfCanFileBeTruncated(SectionPointers, NewSize) \
+    MmCanFileBeTruncated((SectionPointers), (NewSize))
+#define ExfRequestorProcess(Irp)    IoGetRequestorProcess(Irp)
+#define EXF_MAX_MAJOR_FUNCTION      IRP_MJ_MAXIMUM_FUNCTION
+#endif
 
 #include "exfdisk.h"
 
@@ -234,8 +250,8 @@ typedef struct _EXF_RUN_LIST {
 typedef struct _EXF_FCB {
     FSRTL_COMMON_FCB_HEADER Header;
     SECTION_OBJECT_POINTERS SectionObjectPointers;
-    ERESOURCE   Resource;
-    ERESOURCE   PagingIoResource;
+    EXF_ERESOURCE Resource;
+    EXF_ERESOURCE PagingIoResource;
     PEXF_VCB    Vcb;
     struct _EXF_FCB *ParentDcb;
     LIST_ENTRY  FcbLinks;
@@ -296,8 +312,8 @@ typedef struct _EXF_CCB {
 struct _EXF_VCB {
     CSHORT      NodeTypeCode;
     CSHORT      NodeByteSize;
-    ERESOURCE   Resource;
-    ERESOURCE   AllocResource;
+    EXF_ERESOURCE Resource;
+    EXF_ERESOURCE AllocResource;
     LIST_ENTRY  VcbLinks;
     PVPB        Vpb;
     PDEVICE_OBJECT TargetDeviceObject;
@@ -366,7 +382,7 @@ struct _EXF_VCB {
 typedef struct _EXF_DATA {
     PDRIVER_OBJECT  DriverObject;
     PDEVICE_OBJECT  FileSystemDeviceObject;
-    ERESOURCE       Resource;       /* protects VcbList */
+    EXF_ERESOURCE   Resource;       /* protects VcbList */
     LIST_ENTRY      VcbList;
     FAST_IO_DISPATCH FastIoDispatch;
     CACHE_MANAGER_CALLBACKS CacheManagerCallbacks;

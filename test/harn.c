@@ -15,7 +15,11 @@ static ULONG g_sector;
 static LONGLONG g_partlen;
 static int g_disk_reads, g_disk_writes, g_readonly, g_diskro, g_disk_flushes;
 
-#define EXF_STATUS_DISMOUNTED_T ((NTSTATUS)0xC000026EL)
+#if defined(EXF_NT4) || defined(EXF_NT31)
+#define EXF_STATUS_DISMOUNTED_T ((NTSTATUS)0xC0000098L)    /* STATUS_FILE_INVALID */
+#else
+#define EXF_STATUS_DISMOUNTED_T ((NTSTATUS)0xC000026EL)    /* STATUS_VOLUME_DISMOUNTED */
+#endif
 #define FILE_LIST_DIRECTORY_R (FILE_READ_DATA | SYNCHRONIZE)
 #define T(c) do { if (!(c)) { fprintf(stderr, "TEST FAILED %s:%d: %s\n", __FILE__, __LINE__, #c); g_errors++; } } while (0)
 #define TS(st, exp) do { NTSTATUS _s = (st); if (_s != (NTSTATUS)(exp)) { fprintf(stderr, "TEST FAILED %s:%d: %s = %08x, expected %08x\n", __FILE__, __LINE__, #st, (unsigned)_s, (unsigned)(exp)); g_errors++; } } while (0)
@@ -124,6 +128,10 @@ static NTSTATUS OpenEx(const char *upath, PFILE_OBJECT related, ACCESS_MASK acce
     NTSTATUS st; int k;
     for (k = 0; k < 3; k++) {
         st = OpenOnce(upath, related, access, share, disp, options, attrs, spflags, out, infop);
+#ifdef EXF_NT31
+        /* no IO_REMOUNT: the caller tries again, as exfmt and exfatchk do */
+        if (st == STATUS_WRONG_VOLUME && !g_raw_reparse) continue;
+#endif
         if (st != STATUS_REPARSE || g_raw_reparse) break;
     }
     return st;
@@ -447,9 +455,16 @@ int main(int argc, char **argv)
         oldvpb = g_disk->Vpb;
         fclose(g_img); g_img = fopen(getenv("SWAP"), "r+b"); fseeko(g_img, 0, SEEK_END); g_partlen = ftello(g_img);
         g_disk->Flags |= DO_VERIFY_VOLUME;
+#ifndef EXF_NT31
         g_raw_reparse = 1;
         TS(OPEN_R("\\small.txt", &f), STATUS_REPARSE);
         g_raw_reparse = 0;
+#else
+        /* no IO_REMOUNT on NT 3.1: this open fails, the next one mounts */
+        g_raw_reparse = 1;
+        TS(OPEN_R("\\small.txt", &f), STATUS_WRONG_VOLUME);
+        g_raw_reparse = 0;
+#endif
         T(g_disk->Vpb != oldvpb);                         /* fresh VPB for the new medium */
         TS(Read(old, 0, 6, c, FALSE, &info), EXF_STATUS_DISMOUNTED_T);
         k = g_pool;
@@ -568,9 +583,13 @@ int main(int argc, char **argv)
         unsigned char a[5000], b[5000]; IO_STATUS_BLOCK io; LARGE_INTEGER o; PDEVICE_OBJECT vd = IoGetRelatedDeviceObject(f);
         TS(Read(f, 12345, 5000, a, FALSE, &info), STATUS_SUCCESS);
         o.QuadPart = 12345;
-        T(drv->FastIoDispatch->FastIoRead(f, &o, 5000, TRUE, 0, b, &io, vd)); T(io.Status == STATUS_SUCCESS && io.Information == 5000);
+        T(drv->FastIoDispatch->FastIoRead(f, &o, 5000, TRUE, 0, b, &io FIO_DEV(vd))); T(io.Status == STATUS_SUCCESS && io.Information == 5000);
         T(!memcmp(a, b, 5000)); T(g_fastio_reads == 1);
+#ifndef EXF_NT31
         { FILE_NETWORK_OPEN_INFORMATION no; T(drv->FastIoDispatch->FastIoQueryNetworkOpenInfo(f, TRUE, &no, &io, vd)); T(no.EndOfFile.QuadPart == 1000003); }
+#else
+        T(drv->FastIoDispatch->FastIoQueryNetworkOpenInfo == NULL);
+#endif
         Balanced("fastio");
         Close(f);
     }
@@ -578,10 +597,17 @@ int main(int argc, char **argv)
     TS(Open("\\many", NULL, FILE_LIST_DIRECTORY_R, 7, FILE_OPEN, 0, &d1), STATUS_SUCCESS);
     if (d1) {
         PIRP ni; struct qd q; memset(&q, 0, sizeof(q));
+#ifndef EXF_NT31
         Simple(d1, IRP_MJ_DIRECTORY_CONTROL, IRP_MN_NOTIFY_CHANGE_DIRECTORY, &ni, SetupQd, &q);
         T(!ni->Completed); T(g_pending_notify == ni); Balanced("notify");
         Close(d1);
         T(ni->Completed); IoFreeIrp(ni);
+#else
+        /* not offered on NT 3.1 */
+        TS(Simple(d1, IRP_MJ_DIRECTORY_CONTROL, IRP_MN_NOTIFY_CHANGE_DIRECTORY, &ni, SetupQd, &q), STATUS_INVALID_DEVICE_REQUEST);
+        T(ni->Completed); T(g_pending_notify == NULL); IoFreeIrp(ni); Balanced("notify");
+        Close(d1);
+#endif
     }
 
     /* lock, dismount, teardown, remount */

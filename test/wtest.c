@@ -116,7 +116,7 @@ static BOOLEAN FastWrite(PFILE_OBJECT f, LONGLONG off, ULONG len, const void *bu
 {
     IO_STATUS_BLOCK io; LARGE_INTEGER o; BOOLEAN ok;
     o.QuadPart = off;
-    ok = w_drv->FastIoDispatch->FastIoWrite(f, &o, len, TRUE, 0, (PVOID)buf, &io, IoGetRelatedDeviceObject(f));
+    ok = w_drv->FastIoDispatch->FastIoWrite(f, &o, len, TRUE, 0, (PVOID)buf, &io FIO_DEV(IoGetRelatedDeviceObject(f)));
     if (ok) T(io.Status == STATUS_SUCCESS && io.Information == len);
     Balanced("fastwrite");
     return ok;
@@ -709,9 +709,15 @@ static void Robustness(void)
         fflush(g_img); fseeko(g_img, 100, SEEK_SET); T(fread(save, 1, 4, g_img) == 4);
         fseeko(g_img, 100, SEEK_SET); fwrite("\x11\x22\x33\x44", 1, 4, g_img); fflush(g_img);
         g_disk->Flags |= DO_VERIFY_VOLUME;
+#ifndef EXF_NT31
         g_raw_reparse = 1;
         TS(OPEN_R("\\", &v), STATUS_REPARSE);
         g_raw_reparse = 0;
+#else
+        g_raw_reparse = 1;
+        TS(OPEN_R("\\", &v), STATUS_WRONG_VOLUME);      /* no IO_REMOUNT on NT 3.1 */
+        g_raw_reparse = 0;
+#endif
         T(g_disk->Vpb != old);
         TS(Write(f, 0, 10, g_rbuf, FALSE, &info), EXF_STATUS_DISMOUNTED_T);
         /* back to the original medium before the next mount */
@@ -724,6 +730,7 @@ static void Robustness(void)
         VerifyFile(MGet("/swapped.bin"), 1);
     }
 
+#if !defined(EXF_NT4) && !defined(EXF_NT31)   /* PnP came with Windows 2000 */
     /* surprise removal with dirty data: handles fail, the data is lost, the disk stays consistent */
     PutFile("/gone.bin", 50000);
     TS(Open("", NULL, FILE_GENERIC_READ | FILE_WRITE_DATA, 7, FILE_OPEN, 0, &v), STATUS_SUCCESS);
@@ -744,6 +751,7 @@ static void Robustness(void)
         if (VolumeDirty() == 1) { Unmount(); ClearDirtyOnDisk(); }
         VerifyFile(MGet("/gone.bin"), 1);
     }
+#endif
 
     /* FSCTL_MARK_VOLUME_DIRTY sticks: neither a lock nor a remount clears it */
     TS(Open("", NULL, FILE_GENERIC_READ | FILE_WRITE_DATA, 7, FILE_OPEN, 0, &v), STATUS_SUCCESS);
@@ -801,6 +809,7 @@ static void Robustness(void)
     Unmount();
     PutFile("/after-ro.txt", 100);
 
+#if !defined(EXF_NT4) && !defined(EXF_NT31)   /* PnP came with Windows 2000 */
     /* many handles, then a surprise removal: every close still arrives and the volume goes */
     before = g_devices;
     {
@@ -818,6 +827,7 @@ static void Robustness(void)
         T(g_devices == w_base_dev);
         T(VolumeDirty() == 0);
     }
+#endif
     (void)before;
     Remount();
     VerifyTree(&g_root, 1);

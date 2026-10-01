@@ -1,0 +1,21 @@
+TARGETNAME=exfinst
+TARGETPATH=obj
+TARGETTYPE=PROGRAM
+
+# The source lives one level up (inst\)
+INCLUDES=..
+
+UMTYPE=console
+UMENTRY=main
+
+# The system msvcrt.dll: the WDK's static CRT needs functions Windows 2000 lacks
+USE_MSVCRT=1
+
+TARGETLIBS=$(SDK_LIB_PATH)\kernel32.lib \
+           $(SDK_LIB_PATH)\advapi32.lib
+
+MSC_WARNING_LEVEL=/W3
+_NT_TARGET_VERSION=$(_NT_TARGET_VERSION_WIN2K)
+
+SOURCES=..\exfinst.c \
+        exfinst.rc

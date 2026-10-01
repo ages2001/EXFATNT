@@ -356,7 +356,7 @@ ExfCommonCleanup (
                 FsRtlNotifyCleanup(Vcb->NotifySync, &Vcb->DirNotifyList, Ccb);
             } else {
                 FsRtlFastUnlockAll(&Fcb->FileLock, FileObject,
-                                   IoGetRequestorProcess(Ctx->Irp), NULL);
+                                   ExfRequestorProcess(Ctx->Irp), NULL);
             }
 
             if (Ccb->Flags & CCB_FLAG_DELETE_ON_CLOSE) {

@@ -303,10 +303,18 @@ def main():
     fmt = [os.path.join(FMT, 'exfmtc.c'), os.path.join(FMT, 'exfupc.c')]
     chk = [os.path.join(CHK, 'exfchkc.c')]
     print('building harness')
-    run('gcc', '-std=gnu99', '-fshort-wchar', '-g', '-O0', '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-        '-Wall', '-Wno-unused-label', '-Wno-unused-variable', '-Wno-unused-but-set-variable', '-Wno-multichar',
-        '-Wno-pointer-sign', '-Wno-unused-function', '-DEXF_DEBUG', '-I' + HERE, '-I' + SRC, '-o', harn,
-        os.path.join(HERE, 'harn.c'), os.path.join(HERE, 'kern.c'), *srcs, *fmt, *chk)
+    def build_harn(out, *defines):
+        run('gcc', '-std=gnu99', '-fshort-wchar', '-g', '-O0', '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
+            '-Wall', '-Wno-unused-label', '-Wno-unused-variable', '-Wno-unused-but-set-variable', '-Wno-multichar',
+            '-Wno-pointer-sign', '-Wno-unused-function', '-Werror=incompatible-pointer-types', '-DEXF_DEBUG', *defines,
+            '-I' + HERE, '-I' + SRC, '-o', out,
+            os.path.join(HERE, 'harn.c'), os.path.join(HERE, 'kern.c'), *srcs, *fmt, *chk)
+    build_harn(harn)
+    # the NT 3.51/4.0 and NT 3.1 builds of the driver (EXF_NT4, EXF_NT31)
+    harn_nt4 = os.path.join(work, 'harn_nt4')
+    harn_nt31 = os.path.join(work, 'harn_nt31')
+    build_harn(harn_nt4, '-DEXF_NT4')
+    build_harn(harn_nt31, '-DEXF_NT31')
 
     exfchkl = os.path.join(work, 'exfchkl')
     run('gcc', '-std=gnu99', '-g', '-Wall', '-fsanitize=address,undefined', '-o', exfchkl,
@@ -436,6 +444,27 @@ def main():
         if bad:
             failed += 1
             print('\n'.join(bad[:15]))
+    # the NT 3.51/4.0 and NT 3.1 builds: reads, then writes
+    for vname, vharn in (('NT 4.0 build', harn_nt4), ('NT 3.1 build', harn_nt31)):
+        # no PnP before Windows 2000
+        vcases = cases[:5] + [c for c in cases if c[0] == 'media change']
+        for name, env, image, sector in vcases:
+            r = subprocess.run([vharn, img(image), str(sector)], env=dict(env0, **env), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            out = r.stdout.decode(errors='replace')
+            ok = r.returncode == 0 and 'errors=0' in out and 'FAILED' not in out and 'ERROR' not in out
+            print('%s %s, %s' % ('PASS' if ok else 'FAIL', name, vname))
+            if not ok:
+                failed += 1
+                print('\n'.join(out.splitlines()[-10:]))
+        for name, size, cl, sector, seed, ops, extra in wcases:
+            if name not in ('w4k', 'w4ks', 'w512', 'chaos4k', 'reformat'):
+                continue
+            ops = min(ops, 1000)
+            bad = write_case(vharn, work, name + '_' + os.path.basename(vharn), size, cl, sector, seed + 100, ops, env0, extra)
+            print('%s write, cluster %d, sector %d, seed %d, %d operations, %s' % ('FAIL' if bad else 'PASS', cl, sector, seed + 100, ops, vname))
+            if bad:
+                failed += 1
+                print('\n'.join(bad[:15]))
     # the format tool: every sector size and cluster size, then the write tests on the result
     exfmtl = os.path.join(work, 'exfmtl')
     run('gcc', '-std=gnu99', '-g', '-Wall', '-fsanitize=address,undefined', '-o', exfmtl,

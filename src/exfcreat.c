@@ -309,7 +309,7 @@ ExfOverwriteFile (
 
     Zero.QuadPart = 0;
 
-    if (!MmCanFileBeTruncated(&Fcb->SectionObjectPointers, &Zero)) {
+    if (!ExfCanFileBeTruncated(&Fcb->SectionObjectPointers, &Zero)) {
         return STATUS_USER_MAPPED_FILE;
     }
 

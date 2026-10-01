@@ -150,8 +150,8 @@ ExfAllocateFcb (
     ExInitializeResourceLite(&Fcb->Resource);
     ExInitializeResourceLite(&Fcb->PagingIoResource);
 
-    Fcb->Header.Resource = &Fcb->Resource;
-    Fcb->Header.PagingIoResource = &Fcb->PagingIoResource;
+    Fcb->Header.Resource = (PERESOURCE)&Fcb->Resource;
+    Fcb->Header.PagingIoResource = (PERESOURCE)&Fcb->PagingIoResource;
 
     FsRtlInitializeFileLock(&Fcb->FileLock, NULL, NULL);
 

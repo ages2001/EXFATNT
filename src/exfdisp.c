@@ -223,6 +223,8 @@ ExfPerformVerify (
     /* A different volume is in the drive: have the create reparsed */
     FileObject = Ctx->IrpSp->FileObject;
 
+#ifndef EXF_NT31
+    /* NT 3.1 has no IO_REMOUNT: the open fails and is retried by the caller */
     if (Ctx->IrpSp->MajorFunction == IRP_MJ_CREATE &&
         FileObject != NULL &&
         FileObject->RelatedFileObject == NULL &&
@@ -232,6 +234,9 @@ ExfPerformVerify (
         Ctx->Irp->IoStatus.Information = IO_REMOUNT;
         return STATUS_REPARSE;
     }
+#else
+    UNREFERENCED_PARAMETER(FileObject);
+#endif
 
     return Status;
 }

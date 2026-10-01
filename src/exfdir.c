@@ -486,7 +486,9 @@ ExfQueryDirectory (
 
             } else if (Ccb->QueryState == 1) {
 
-                ExfListFromFcb(Dcb->ParentDcb, &List, L"..", 2 * sizeof(WCHAR), 1);
+                /* The root has no times of its own: below it, ".." shows the directory's */
+                ExfListFromFcb(Dcb->ParentDcb->ParentDcb != NULL ? Dcb->ParentDcb : Dcb,
+                               &List, L"..", 2 * sizeof(WCHAR), 1);
                 Ccb->QueryState = 2;
 
             } else {
@@ -577,6 +579,13 @@ ExfNotifyChangeDirectory (
     PIO_STACK_LOCATION IrpSp = Ctx->IrpSp;
     NTSTATUS Status;
 
+#ifdef EXF_NT31
+    /* The NT 3.1 FsRtl notify package predates the one used here */
+    UNREFERENCED_PARAMETER(Vcb);
+    UNREFERENCED_PARAMETER(IrpSp);
+    UNREFERENCED_PARAMETER(Ccb);
+    Status = STATUS_INVALID_DEVICE_REQUEST;
+#else
     (VOID)ExAcquireResourceExclusiveLite(&Vcb->Resource, TRUE);
 
     __try {
@@ -610,6 +619,7 @@ ExfNotifyChangeDirectory (
         ExfRelease(&Vcb->Resource);
     }
 
+#endif
     return Status;
 }
 

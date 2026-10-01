@@ -147,6 +147,13 @@ static HANDLE Volume;
 static EXU8 *Bounce;
 static int Verbose;
 
+/*
+ * Set when the command line names one partition. NT 3.5 and later run
+ * "autocheck exfachk *" once with "*"; NT 3.1 runs it once per drive,
+ * with that drive's \Device\HarddiskN\PartitionM.
+ */
+static EXU32 OnlyDisk = 0xFFFFFFFF, OnlyPart;
+
 /* ------------------------------------------------------------------ */
 /* Output on the boot screen                                           */
 /* ------------------------------------------------------------------ */
@@ -362,9 +369,13 @@ static int CheckDisk(EXU32 Disk, int Always)
     IO_STATUS_BLOCK Io;
     DISK_GEOMETRY Geometry;
     DRIVE_LAYOUT_INFORMATION *Layout;
-    EXU32 i, Size = 16384, Sector;
+    EXU32 i, Size = 16384, Sector, Counted = 0;
     NTSTATUS Status;
     EXU8 *Boot;
+
+    if (OnlyDisk != 0xFFFFFFFF && Disk != OnlyDisk) {
+        return 1;
+    }
 
     if (!NT_SUCCESS(Open(Disk, 0, 0, &Whole))) {
         return 0;
@@ -386,10 +397,23 @@ static int CheckDisk(EXU32 Disk, int Always)
 
             PARTITION_INFORMATION *p = &Layout->PartitionEntry[i];
             UCHAR Type = p->PartitionType;
+            EXU32 Part;
             int State;
 
-            if (p->PartitionNumber == 0 || p->PartitionLength.QuadPart == 0 ||
+            if (Type == 0 || p->PartitionLength.QuadPart == 0 ||
                 Type == 0x05 || Type == 0x0F || Type == 0x85) {
+                continue;
+            }
+
+            /*
+             * NT 3.1 has no PartitionNumber: its HiddenSectors is 64 bits
+             * there, so the field reads 0. The partitions are numbered in
+             * this order, skipping the extended ones.
+             */
+            Counted++;
+            Part = p->PartitionNumber != 0 ? p->PartitionNumber : Counted;
+
+            if (OnlyDisk != 0xFFFFFFFF && (Disk != OnlyDisk || Part != OnlyPart)) {
                 continue;
             }
 
@@ -402,7 +426,7 @@ static int CheckDisk(EXU32 Disk, int Always)
                 continue;
             }
 
-            CheckVolume(Disk, p->PartitionNumber, Sector, p->PartitionLength.QuadPart / Sector);
+            CheckVolume(Disk, Part, Sector, p->PartitionLength.QuadPart / Sector);
         }
     }
 
@@ -433,6 +457,26 @@ void NTAPI NtProcessStartup(PEB *Peb)
             if (c == 'p' || c == 'P') Always = 1;
             if (c == 'v' || c == 'V') Verbose = 1;
         }
+    }
+
+    /* \Device\HarddiskN\PartitionM: that partition only */
+    for (i = 0; i + 26 < n; i++) {
+        static const char Pre[] = "\\device\\harddisk";
+        EXU32 k, v;
+        for (k = 0; Pre[k] != 0; k++) {
+            WCHAR c = Line->Buffer[i + k];
+            if (c >= 'A' && c <= 'Z') c = (WCHAR)(c - 'A' + 'a');
+            if (c != (WCHAR)Pre[k]) break;
+        }
+        if (Pre[k] != 0) continue;
+        k += i;
+        for (v = 0; k < n && Line->Buffer[k] >= '0' && Line->Buffer[k] <= '9'; k++) v = v * 10 + (Line->Buffer[k] - '0');
+        if (k + 10 >= n || Line->Buffer[k] != '\\') break;
+        k += 10;    /* \Partition */
+        OnlyPart = 0;
+        while (k < n && Line->Buffer[k] >= '0' && Line->Buffer[k] <= '9') OnlyPart = OnlyPart * 10 + (Line->Buffer[k++] - '0');
+        if (OnlyPart != 0) OnlyDisk = v;
+        break;
     }
 
     if (!NT_SUCCESS(NtAllocateVirtualMemory(CURRENT_PROCESS, &Memory, 0, &Size, MEM_COMMIT, PAGE_READWRITE))) {

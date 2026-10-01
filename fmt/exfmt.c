@@ -10,10 +10,14 @@
 
 #include <windows.h>
 #include <winioctl.h>
+#ifdef EXF_OWN_CRT
+#include "exfcrt.h"     /* NT build: no C library, runs on NT 3.1 too */
+#else
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#endif
 #include "exfmt.h"
 
 #define ALIGNED_SIZE (1024UL * 1024 + 65536)
@@ -271,8 +275,13 @@ int main(int argc, char **argv)
             goto Done;
         }
         CloseHandle(Volume);
+        /* NT 3.1 fails the first open after a dismount while it mounts again */
         Volume = CreateFileA(Path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                              NULL, OPEN_EXISTING, 0, NULL);
+        if (Volume == INVALID_HANDLE_VALUE) {
+            Volume = CreateFileA(Path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                 NULL, OPEN_EXISTING, 0, NULL);
+        }
         if (Volume == INVALID_HANDLE_VALUE) {
             Fail("Opening the volume");
             return 1;

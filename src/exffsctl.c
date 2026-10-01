@@ -303,7 +303,9 @@ ExfMountVolume (
             VolumeDevice->AlignmentRequirement = TargetDevice->AlignmentRequirement;
         }
 
-        VolumeDevice->SectorSize = (USHORT)SectorSize;
+#ifndef EXF_NT31
+        VolumeDevice->SectorSize = (USHORT)SectorSize;  /* a spare field on NT 3.1 */
+#endif
 
 #ifdef DO_DEVICE_INITIALIZING
         VolumeDevice->Flags &= ~DO_DEVICE_INITIALIZING;

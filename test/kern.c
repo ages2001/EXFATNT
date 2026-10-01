@@ -37,6 +37,7 @@ PVOID ExAllocatePoolWithTag(POOL_TYPE t, size_t n, ULONG tag)
     g_pool++;
     return h + 1;
 }
+PVOID ExAllocatePool(POOL_TYPE t, size_t n) { return ExAllocatePoolWithTag(t, n, 0); }
 void ExFreePool(PVOID p)
 {
     PH *h = (PH *)p - 1; unsigned char *e = (unsigned char *)p + h->n; int i;
@@ -167,6 +168,11 @@ BOOLEAN ExAcquireResourceExclusiveLite(PERESOURCE r, BOOLEAN w)
     if (!CanAcquire(r, t_self, 1)) { if (!w) return FALSE; WaitFor(r, 1); }
     r->Exclusive++; r->X[t_self]++; g_res++; return TRUE;
 }
+void ExInitializeResource(PERESOURCE r) { ExInitializeResourceLite(r); }
+void ExDeleteResource(PERESOURCE r) { ExDeleteResourceLite(r); }
+BOOLEAN ExAcquireResourceShared(PERESOURCE r, BOOLEAN w) { return ExAcquireResourceSharedLite(r, w); }
+BOOLEAN ExAcquireResourceExclusive(PERESOURCE r, BOOLEAN w) { return ExAcquireResourceExclusiveLite(r, w); }
+void ExReleaseResourceForThread(PERESOURCE r, ERESOURCE_THREAD t) { ExReleaseResourceForThreadLite(r, t); }
 void ExReleaseResourceForThreadLite(PERESOURCE r, ERESOURCE_THREAD t)
 {
     CHECK(r->Initialized);
@@ -863,13 +869,16 @@ BOOLEAN FsRtlFastCheckLockForRead(PFILE_LOCK l, PLARGE_INTEGER o, PLARGE_INTEGER
 NTSTATUS FsRtlFastUnlockAll(PFILE_LOCK l, PFILE_OBJECT f, PEPROCESS p, PVOID c) { return STATUS_SUCCESS; }
 NTSTATUS FsRtlProcessFileLock(PFILE_LOCK l, PIRP i, PVOID c) { i->IoStatus.Status = STATUS_SUCCESS; IoCompleteRequest(i, 0); return STATUS_SUCCESS; }
 int g_fastio_reads;
-BOOLEAN FsRtlCopyRead(PFILE_OBJECT f, PLARGE_INTEGER o, ULONG l, BOOLEAN w, ULONG k, PVOID b, PIO_STATUS_BLOCK s, PDEVICE_OBJECT d)
+BOOLEAN FsRtlCopyRead(PFILE_OBJECT f, PLARGE_INTEGER o, ULONG l, BOOLEAN w, ULONG k, PVOID b, PIO_STATUS_BLOCK s FIO_DEV(PDEVICE_OBJECT d))
 {
+#ifdef EXF_NT31
+    PDEVICE_OBJECT d = IoGetRelatedDeviceObject(f);
+#endif
     FSRTL_COMMON_FCB_HEADER *h = f->FsContext;
     BOOLEAN ok;
     if (f->PrivateCacheMap == NULL || h->IsFastIoPossible == FastIoIsNotPossible) return FALSE;
     if (h->IsFastIoPossible == FastIoIsQuestionable &&
-        !d->DriverObject->FastIoDispatch->FastIoCheckIfPossible(f, o, l, w, k, TRUE, s, d)) return FALSE;
+        !d->DriverObject->FastIoDispatch->FastIoCheckIfPossible(f, o, l, w, k, TRUE, s FIO_DEV(d))) return FALSE;
     FsRtlEnterFileSystem();
     ExAcquireResourceSharedLite(h->Resource, TRUE);
     if (o->QuadPart >= h->FileSize.QuadPart) { s->Status = STATUS_END_OF_FILE; s->Information = 0; ok = TRUE; }
@@ -888,8 +897,11 @@ BOOLEAN FsRtlCopyRead(PFILE_OBJECT f, PLARGE_INTEGER o, ULONG l, BOOLEAN w, ULON
  * the main resource, without asking the file system.
  */
 int g_fastio_writes;
-BOOLEAN FsRtlCopyWrite(PFILE_OBJECT f, PLARGE_INTEGER o, ULONG l, BOOLEAN w, ULONG k, PVOID b, PIO_STATUS_BLOCK s, PDEVICE_OBJECT d)
+BOOLEAN FsRtlCopyWrite(PFILE_OBJECT f, PLARGE_INTEGER o, ULONG l, BOOLEAN w, ULONG k, PVOID b, PIO_STATUS_BLOCK s FIO_DEV(PDEVICE_OBJECT d))
 {
+#ifdef EXF_NT31
+    PDEVICE_OBJECT d = IoGetRelatedDeviceObject(f);
+#endif
     FSRTL_COMMON_FCB_HEADER *h = f->FsContext;
     LARGE_INTEGER off = *o, end; BOOLEAN toEof = (o->LowPart == 0xffffffff && o->HighPart == -1), ext;
     if (f->PrivateCacheMap == NULL || h->IsFastIoPossible == FastIoIsNotPossible) return FALSE;
@@ -898,7 +910,7 @@ BOOLEAN FsRtlCopyWrite(PFILE_OBJECT f, PLARGE_INTEGER o, ULONG l, BOOLEAN w, ULO
     ExAcquireResourceExclusiveLite(h->Resource, TRUE);
     if (h->IsFastIoPossible == FastIoIsNotPossible ||
         (h->IsFastIoPossible == FastIoIsQuestionable &&
-         !d->DriverObject->FastIoDispatch->FastIoCheckIfPossible(f, o, l, w, k, FALSE, s, d))) {
+         !d->DriverObject->FastIoDispatch->FastIoCheckIfPossible(f, o, l, w, k, FALSE, s FIO_DEV(d)))) {
         ExReleaseResourceForThreadLite(h->Resource, 0); FsRtlExitFileSystem(); return FALSE;
     }
     if (toEof) off = h->FileSize;

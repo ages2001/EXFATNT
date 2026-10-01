@@ -110,7 +110,7 @@ ExfSetFileSize (
     Size.QuadPart = NewSize;
 
     if (NewSize < Fcb->Header.FileSize.QuadPart &&
-        !MmCanFileBeTruncated(&Fcb->SectionObjectPointers, &Size)) {
+        !ExfCanFileBeTruncated(&Fcb->SectionObjectPointers, &Size)) {
 
         return STATUS_USER_MAPPED_FILE;
     }
