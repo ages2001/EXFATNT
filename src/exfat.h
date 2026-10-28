@@ -1,7 +1,9 @@
 /*
- * EXFATNT - exFAT file system driver for Windows NT 3.51, 4.0, 2000 and XP
+ * EXFATNT - exFAT file system driver for Windows NT 3.1, 3.5, 3.51, 4.0,
+ * 2000 and XP
  *
- *   EXF_NT31  Windows NT 3.1 (as EXF_NT4, plus exfnt31.h; see src\NT31\build.bat)
+ *   EXF_CROSS GCC cross build (build/build_cross.sh): one binary for NT 3.1 -
+ *             4.0; implies EXF_NT31 and EXF_NT4
  *   EXF_NT4   Windows NT 3.51 and 4.0 (NT4 DDK + free ntifs.h, see src\NT\build.bat)
  *   (none)    Windows 2000 and XP, x86 and amd64 (WDK 6001, src\2KXP)
  */
@@ -9,25 +11,216 @@
 #ifndef _EXFAT_H_
 #define _EXFAT_H_
 
-/* NT 3.1 is built as NT 3.51/4.0, with exfnt31.h on top */
-#if defined(EXF_NT31) && !defined(EXF_NT4)
+/*
+ * EXF_CROSS: a GCC/clang cross build against the mingw-w64 DDK headers, for
+ * producing and boot-testing an NT 3.1 binary without Visual C++. It implies
+ * the NT 3.1 import profile (EXF_NT31) and the NT4-era code paths (EXF_NT4),
+ * and shims the SEH keywords GCC/clang-for-NT does not provide: __finally
+ * blocks still run and __leave still unwinds (cleanup is preserved), only the
+ * catching of CPU exceptions is dropped. The real driver is built with
+ * Visual C++ (src\NT\build.bat) and does not use any of this.
+ */
+#ifdef EXF_CROSS
+#ifndef EXF_NT31
+#define EXF_NT31
+#endif
+#ifndef EXF_NT4
 #define EXF_NT4
 #endif
+#define __try
+#define __finally               __exf_leave: __attribute__((unused));
+#define __except(x)             if (0)
+#define __leave                 goto __exf_leave
+#ifndef AbnormalTermination
+#define AbnormalTermination()   0
+#endif
+#ifndef GetExceptionInformation
+#define GetExceptionInformation() ((PEXCEPTION_POINTERS)0)
+#endif
+#ifndef GetExceptionCode
+#define GetExceptionCode()      0
+#endif
+#ifndef EXCEPTION_EXECUTE_HANDLER
+#define EXCEPTION_EXECUTE_HANDLER 1
+#endif
+#ifndef EXCEPTION_CONTINUE_SEARCH
+#define EXCEPTION_CONTINUE_SEARCH 0
+#endif
+#endif /* EXF_CROSS */
 
 #include <ntifs.h>
 #include <ntdddisk.h>
 
+#include "exfdisk.h"
+
+/* ------------------------------------------------------------------ */
+/* NT 3.1 import profile                                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Windows NT 3.1 does not export the Lite executive-resource functions,
+ * MmCanFileBeTruncated, or the FsRtlNotifyFull / NotifySync change-
+ * notification family (all introduced in NT 3.5/4.0). Mapping the Lite
+ * calls to their originals is exact; truncation always allowed is the safe
+ * choice where the memory manager cannot answer; change notification is an
+ * optional feature and is left out on NT 3.1. One binary then loads on NT
+ * 3.1 through 4.0. (NT 3.51 and later export the Lite set, so a build
+ * without EXF_NT31 uses it directly.)
+ */
 #ifdef EXF_NT31
-#include "exfnt31.h"
-#else
-typedef ERESOURCE EXF_ERESOURCE, *PEXF_ERESOURCE;
-#define ExfCanFileBeTruncated(SectionPointers, NewSize) \
-    MmCanFileBeTruncated((SectionPointers), (NewSize))
-#define ExfRequestorProcess(Irp)    IoGetRequestorProcess(Irp)
-#define EXF_MAX_MAJOR_FUNCTION      IRP_MJ_MAXIMUM_FUNCTION
+
+/*
+ * The mingw DDK aliases the legacy resource names to their Lite forms (the
+ * only ones modern ntoskrnl exports). Undo that and import the executive-
+ * resource functions that are common to EVERY NT the one binary must load
+ * on - 3.1, 3.51 and 4.0 - resolving the Lite names to them.
+ *
+ * The catch is the shared acquire: NT 3.1 exports ExAcquireResourceShared
+ * but not the Lite form, while NT 3.51+ export ExAcquireResourceSharedLite
+ * but DROPPED ExAcquireResourceShared. There is no shared-acquire name
+ * common to all three, and an import the running kernel cannot resolve makes
+ * the OS loader reject the driver as "missing or corrupt" (this is exactly
+ * why the single binary failed to load on NT 3.51). The exclusive acquire,
+ * by contrast, is exported under the same name (ExAcquireResourceExclusive)
+ * by every one of them. So the one binary acquires exclusively wherever the
+ * code asks for shared: exclusive is always a safe substitute for shared
+ * (it is strictly more restrictive, the lock hierarchy stays acyclic, so no
+ * new deadlock is possible), at the only cost of serialising concurrent
+ * readers - immaterial on the uniprocessor retro systems this targets.
+ * (A Visual C++ build pinned to a single NT version can instead import that
+ * version's real shared acquire and keep true reader concurrency.)
+ */
+#undef ExAcquireResourceExclusive
+#undef ExAcquireResourceShared
+#undef ExReleaseResourceForThread
+#undef ExInitializeResource
+#undef ExDeleteResource
+#undef ExAcquireResourceExclusiveLite
+#undef ExAcquireResourceSharedLite
+#undef ExReleaseResourceForThreadLite
+#undef ExInitializeResourceLite
+#undef ExDeleteResourceLite
+
+/*
+ * Resolved at DriverEntry from the running ntoskrnl (see exfres.c): the Lite
+ * form on NT 3.51+, the legacy form on NT 3.1. The code calls the Lite names;
+ * they expand to calls through these pointers. (Init/Delete return NTSTATUS in
+ * the Lite ABI and VOID in the legacy one; the pointer type is NTSTATUS and
+ * the legacy return is simply ignored - harmless on stdcall x86.)
+ */
+typedef NTSTATUS (NTAPI *EXF_PINITRES)(PERESOURCE);
+typedef BOOLEAN  (NTAPI *EXF_PACQRES)(PERESOURCE, BOOLEAN);
+typedef VOID     (NTAPI *EXF_PRELRES)(PERESOURCE, ERESOURCE_THREAD);
+typedef NTSTATUS (NTAPI *EXF_PDELRES)(PERESOURCE);
+
+extern EXF_PINITRES ExfpInitRes;
+extern EXF_PACQRES  ExfpAcqExcl;
+extern EXF_PACQRES  ExfpAcqShared;
+extern EXF_PDELRES  ExfpDelRes;
+extern EXF_PRELRES  ExfpRelForThread;
+
+BOOLEAN ExfResolveResourceApi(VOID);
+
+#define ExInitializeResourceLite(r)          ExfpInitRes(r)
+#define ExAcquireResourceExclusiveLite(r,w)  ExfpAcqExcl((r),(w))
+#define ExAcquireResourceSharedLite(r,w)     ExfpAcqShared((r),(w))
+#define ExDeleteResourceLite(r)              ExfpDelRes(r)
+#define ExReleaseResourceForThreadLite(r,t)  ExfpRelForThread((r),(t))
+
+/*
+ * NT 4.0 introduced the fast-call Iof/Obf forms; NT 3.1 has only the
+ * stdcall originals. The DDK maps the plain names to the fast-call ones,
+ * so undo that and declare the stdcall exports NT 3.1 actually has.
+ */
+#undef IoCallDriver
+#undef IoCompleteRequest
+#undef ObDereferenceObject
+__declspec(dllimport) NTSTATUS NTAPI IoCallDriver(PDEVICE_OBJECT, PIRP);
+__declspec(dllimport) VOID     NTAPI IoCompleteRequest(PIRP, CCHAR);
+__declspec(dllimport) VOID     NTAPI ObDereferenceObject(PVOID);
+
+#define MmCanFileBeTruncated(S, N)      TRUE
+
+/*
+ * Change notification. NT 3.1 has no FsRtlNotifyFull package; NT 3.51 and
+ * later do. The universal binary resolves it at load time (exfres.c) on NT
+ * 3.51 and later and delivers live notification there; on NT 3.1 (and 3.5)
+ * the requests are held pending and completed at cleanup instead
+ * (ExfNotifyCleanupList), so nothing ever spins.
+ */
+typedef VOID (NTAPI *EXF_PNOTIFYSYNC)(PNOTIFY_SYNC *);
+typedef VOID (NTAPI *EXF_PNOTIFYCLEANUP)(PNOTIFY_SYNC, PLIST_ENTRY, PVOID);
+typedef VOID (NTAPI *EXF_PNOTIFYCHANGEDIR)(PNOTIFY_SYNC, PLIST_ENTRY, PVOID, PSTRING, BOOLEAN,
+                                           BOOLEAN, ULONG, PIRP, PVOID, PVOID);
+typedef VOID (NTAPI *EXF_PNOTIFYREPORT)(PNOTIFY_SYNC, PLIST_ENTRY, PSTRING, USHORT, PSTRING,
+                                        PSTRING, ULONG, ULONG, PVOID);
+extern EXF_PNOTIFYSYNC      ExfpNotifyInitSync;
+extern EXF_PNOTIFYSYNC      ExfpNotifyUninitSync;
+extern EXF_PNOTIFYCLEANUP   ExfpNotifyCleanup;
+extern EXF_PNOTIFYCHANGEDIR ExfpNotifyChangeDir;
+extern EXF_PNOTIFYREPORT    ExfpNotifyReport;
+#define ExfLiveNotify()     (ExfpNotifyChangeDir != NULL)
+
+#define FsRtlNotifyInitializeSync(S) \
+    do { if (ExfLiveNotify()) ExfpNotifyInitSync(S); else *(S) = NULL; } while (0)
+#define FsRtlNotifyUninitializeSync(S) \
+    do { if (ExfLiveNotify() && *(S) != NULL) ExfpNotifyUninitSync(S); } while (0)
+#define FsRtlNotifyCleanup(a, b, c) \
+    do { if (ExfLiveNotify()) ExfpNotifyCleanup((a), (b), (c)); } while (0)
+#define FsRtlNotifyFullChangeDirectory(a,b,c,d,e,f,g,h,i,j) \
+    ExfpNotifyChangeDir((a),(b),(c),(d),(e),(f),(g),(h),(i),(j))
+#define FsRtlNotifyFullReportChange(a,b,c,d,e,f,g,h,i) \
+    do { if (ExfLiveNotify()) ExfpNotifyReport((a),(b),(c),(d),(e),(f),(g),(h),(i)); } while (0)
+#endif /* EXF_NT31 */
+
+/*
+ * The mingw DDK IO_STACK_LOCATION already carries the file-system members,
+ * so the EXF_NT4 extended-stack cast is a plain identity there.
+ */
+#ifdef EXF_CROSS
+typedef IO_STACK_LOCATION EXTENDED_IO_STACK_LOCATION, *PEXTENDED_IO_STACK_LOCATION;
+
+/* The DDK headers redefine these SEH intrinsics; re-assert the shim so no
+   _abnormal_termination / exception-record references are emitted. */
+#undef AbnormalTermination
+#define AbnormalTermination()       0
+#undef GetExceptionCode
+#define GetExceptionCode()          0
+#undef GetExceptionInformation
+#define GetExceptionInformation()   ((PEXCEPTION_POINTERS)0)
+
+/*
+ * NT 3.1 does not export ExAllocatePoolWithTag, the Ke critical-region
+ * calls, or the top-level-IRP / verify / requestor helpers (newer builds
+ * access them inline through the thread). For the cross/boot-test build,
+ * drop the pool tag, make the critical region a no-op pair, and keep the
+ * top-level IRP in one process-wide slot (the test drives the volume from
+ * a single thread). A Visual C++ NT 3.1 build would instead use the real
+ * inline thread-field accessors.
+ */
+#define ExAllocatePoolWithTag(Type, Size, Tag)  ExAllocatePool((Type), (Size))
+#define KeEnterCriticalRegion()                 ((void)0)
+#define KeLeaveCriticalRegion()                 ((void)0)
+/*
+ * The top-level IRP, the device to verify and the requestor process are
+ * per-thread values NT 3.5 and later keep in the thread and export
+ * accessors for. They are resolved at load time (exfres.c); on NT 3.1 the
+ * top-level IRP is kept in a small per-thread table instead, the requestor
+ * process is the current one (cleanup runs in the closing process) and
+ * there is no device to verify.
+ */
+PIRP           ExfGetTopLevelIrp(VOID);
+VOID           ExfSetTopLevelIrp(PIRP Irp);
+PDEVICE_OBJECT ExfGetDeviceToVerify(VOID);
+VOID           ExfSetDeviceToVerify(PDEVICE_OBJECT Device);
+PEPROCESS      ExfGetRequestorProcess(PIRP Irp);
+#define IoGetTopLevelIrp()          ExfGetTopLevelIrp()
+#define IoSetTopLevelIrp(I)         ExfSetTopLevelIrp((PIRP)(I))
+#define IoGetRequestorProcess(Irp)  ExfGetRequestorProcess(Irp)
+#define IoGetDeviceToVerify(T)      ExfGetDeviceToVerify()
+#define IoSetDeviceToVerify(T, D)   ExfSetDeviceToVerify(D)
 #endif
 
-#include "exfdisk.h"
 
 /* ------------------------------------------------------------------ */
 /* Target configuration                                                */
@@ -164,7 +357,10 @@ typedef struct _EXF_FILE_FS_FULL_SIZE_INFORMATION {
    variadic macros. */
 #define EXF_PFX                 "[EXFATNT] "
 
-#if DBG || defined(EXF_DEBUG)
+#ifdef EXF_DBGPORT
+VOID __cdecl ExfPortPrintf(const char *f, ...);
+#define EXF_DBG(args)           ExfPortPrintf args
+#elif DBG || defined(EXF_DEBUG)
 #define EXF_DBG(args)           DbgPrint args
 #else
 #define EXF_DBG(args)
@@ -190,6 +386,7 @@ typedef struct _EXF_FILE_FS_FULL_SIZE_INFORMATION {
 #define EXF_MAP_UNIT            0x1000      /* CcMapData / CcPinRead granule */
 #define EXF_PAGE_SIZE           0x1000      /* x86 and amd64 */
 #define EXF_ZERO_CHUNK          0x10000     /* zero buffer for disk writes */
+#define EXF_MAX_TRANSFER        0x100000    /* cap one disk IRP */
 
 /* ------------------------------------------------------------------ */
 /* Node types                                                          */
@@ -246,12 +443,21 @@ typedef struct _EXF_RUN_LIST {
     ULONG       Clusters;
 } EXF_RUN_LIST, *PEXF_RUN_LIST;
 
+/*
+ * NT 3.1's ERESOURCE is larger than the structure later DDK/WDK headers (and
+ * the mingw cross headers) describe; every embedded ERESOURCE is followed by
+ * this padding so NT 3.1's ExInitializeResource cannot run past it.
+ */
+#define EXF_ERESOURCE_PAD   0x40
+
 /* Allocated from nonpaged pool: holds ERESOURCEs and the FsRtl header */
 typedef struct _EXF_FCB {
     FSRTL_COMMON_FCB_HEADER Header;
     SECTION_OBJECT_POINTERS SectionObjectPointers;
-    EXF_ERESOURCE Resource;
-    EXF_ERESOURCE PagingIoResource;
+    ERESOURCE   Resource;
+    UCHAR       ResourcePad[EXF_ERESOURCE_PAD];
+    ERESOURCE   PagingIoResource;
+    UCHAR       PagingIoResourcePad[EXF_ERESOURCE_PAD];
     PEXF_VCB    Vcb;
     struct _EXF_FCB *ParentDcb;
     LIST_ENTRY  FcbLinks;
@@ -261,7 +467,7 @@ typedef struct _EXF_FCB {
     ULONG       FcbState;
     SHARE_ACCESS ShareAccess;
     FILE_LOCK   FileLock;
-    ULONG       FileLockSpare[4];   /* in case an older FILE_LOCK is larger */
+    ULONG       FileLockSpare[16];  /* NT 3.1's FILE_LOCK is larger than the headers' */
     PFILE_OBJECT StreamFile;        /* internal cached stream (directory, FAT, bitmap) */
     PKTHREAD    LazyWriteThread;
     LONGLONG    MetaLbo;            /* FAT: volume offset, mapped linearly */
@@ -288,6 +494,7 @@ typedef struct _EXF_FCB {
 #define FCB_STATE_TRUNCATE_ON_CLOSE 0x0020  /* allocation beyond the file size */
 #define FCB_STATE_STREAM_OPEN       0x0040  /* internal stream not closed yet */
 #define FCB_STATE_TEARDOWN          0x0080  /* freed when its stream closes */
+#define FCB_STATE_PAGING_FILE       0x0100  /* a paging file: Mm owns its contents */
 
 typedef struct _EXF_CCB {
     CSHORT      NodeTypeCode;
@@ -312,8 +519,10 @@ typedef struct _EXF_CCB {
 struct _EXF_VCB {
     CSHORT      NodeTypeCode;
     CSHORT      NodeByteSize;
-    EXF_ERESOURCE Resource;
-    EXF_ERESOURCE AllocResource;
+    ERESOURCE   Resource;
+    UCHAR       ResourcePad[EXF_ERESOURCE_PAD];
+    ERESOURCE   AllocResource;
+    UCHAR       AllocResourcePad[EXF_ERESOURCE_PAD];
     LIST_ENTRY  VcbLinks;
     PVPB        Vpb;
     PDEVICE_OBJECT TargetDeviceObject;
@@ -382,12 +591,14 @@ struct _EXF_VCB {
 typedef struct _EXF_DATA {
     PDRIVER_OBJECT  DriverObject;
     PDEVICE_OBJECT  FileSystemDeviceObject;
-    EXF_ERESOURCE   Resource;       /* protects VcbList */
+    ERESOURCE       Resource;       /* protects VcbList */
+    UCHAR           ResourcePad[EXF_ERESOURCE_PAD];
     LIST_ENTRY      VcbList;
     FAST_IO_DISPATCH FastIoDispatch;
     CACHE_MANAGER_CALLBACKS CacheManagerCallbacks;
     CACHE_MANAGER_CALLBACKS MetaCacheCallbacks;
     UNICODE_STRING  RegistryPath;   /* the service key, NUL-terminated */
+    BOOLEAN         ShuttingDown;   /* set in IRP_MJ_SHUTDOWN: skip the disk cache-flush */
 } EXF_DATA, *PEXF_DATA;
 
 extern EXF_DATA ExfData;
@@ -496,6 +707,9 @@ NTSTATUS ExfZeroFileRange(PEXF_FCB Fcb, PFILE_OBJECT FileObject, LONGLONG Start,
 
 /* exfdir.c */
 NTSTATUS ExfCommonDirectoryControl(PEXF_IRP_CONTEXT Ctx);
+#ifdef EXF_NT31
+VOID     ExfNotifyCleanupList(PEXF_VCB Vcb, PEXF_CCB Ccb);
+#endif
 BOOLEAN  ExfNextFileEntry(PEXF_VCB Vcb, PEXF_FCB Dcb, PULONG Offset,
                           const USHORT *WantHash, PEXF_SCAN Scan);
 NTSTATUS ExfLookupName(PEXF_VCB Vcb, PEXF_FCB Dcb, PUNICODE_STRING Name, PEXF_SCAN Scan);

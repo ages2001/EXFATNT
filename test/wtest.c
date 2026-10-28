@@ -116,7 +116,7 @@ static BOOLEAN FastWrite(PFILE_OBJECT f, LONGLONG off, ULONG len, const void *bu
 {
     IO_STATUS_BLOCK io; LARGE_INTEGER o; BOOLEAN ok;
     o.QuadPart = off;
-    ok = w_drv->FastIoDispatch->FastIoWrite(f, &o, len, TRUE, 0, (PVOID)buf, &io FIO_DEV(IoGetRelatedDeviceObject(f)));
+    ok = w_drv->FastIoDispatch->FastIoWrite(f, &o, len, TRUE, 0, (PVOID)buf, &io, IoGetRelatedDeviceObject(f));
     if (ok) T(io.Status == STATUS_SUCCESS && io.Information == len);
     Balanced("fastwrite");
     return ok;
@@ -373,7 +373,7 @@ static void Scripted(void)
 
     /* directories, Unicode names, a deep path */
     Mkdir("/dir"); Mkdir("/dir/sub"); Mkdir("/dir/sub/deeper");
-    Mkdir("/Türkçe klasör"); PutFile("/Türkçe klasör/şğüöçİı.txt", 1234);
+    Mkdir("/Unicode folder İı"); PutFile("/Unicode folder İı/şğüöçİı.txt", 1234);
     Mkdir("/Ελληνικά"); PutFile("/Ελληνικά/αρχείο.bin", 70000);
     PutFile("/dir/sub/deeper/leaf.dat", 5);
     TS(W_CREATE("\\dir", FILE_LIST_DIRECTORY_R, 7, FILE_CREATE, FILE_DIRECTORY_FILE, 0, &f, &info), STATUS_OBJECT_NAME_COLLISION);
@@ -579,7 +579,7 @@ static void Scripted(void)
         TS(SetLabel(f, "twelve chars"), STATUS_INVALID_VOLUME_LABEL);
         TS(SetLabel(f, "a*b"), STATUS_INVALID_VOLUME_LABEL);
         TS(SetLabel(f, ""), STATUS_SUCCESS);
-        TS(SetLabel(f, "Yazı"), STATUS_SUCCESS);
+        TS(SetLabel(f, "Café"), STATUS_SUCCESS);
         Close(f);
     }
 
@@ -614,7 +614,7 @@ static void Scripted(void)
         PFILE_OBJECT r; union { FILE_FS_VOLUME_INFORMATION v; char b[512]; } vi; char l[64];
         TS(OPEN_R("\\", &r), STATUS_SUCCESS);
         if (r) { TS(QueryInfo(r, IRP_MJ_QUERY_VOLUME_INFORMATION, FileFsVolumeInformation, &vi, sizeof(vi), &info), STATUS_SUCCESS);
-                 ToUtf8(vi.v.VolumeLabel, vi.v.VolumeLabelLength / 2, l); T(!strcmp(l, "Yazı")); Close(r); }
+                 ToUtf8(vi.v.VolumeLabel, vi.v.VolumeLabelLength / 2, l); T(!strcmp(l, "Café")); Close(r); }
     }
 
     /* shutdown leaves it clean too */
@@ -709,15 +709,9 @@ static void Robustness(void)
         fflush(g_img); fseeko(g_img, 100, SEEK_SET); T(fread(save, 1, 4, g_img) == 4);
         fseeko(g_img, 100, SEEK_SET); fwrite("\x11\x22\x33\x44", 1, 4, g_img); fflush(g_img);
         g_disk->Flags |= DO_VERIFY_VOLUME;
-#ifndef EXF_NT31
         g_raw_reparse = 1;
         TS(OPEN_R("\\", &v), STATUS_REPARSE);
         g_raw_reparse = 0;
-#else
-        g_raw_reparse = 1;
-        TS(OPEN_R("\\", &v), STATUS_WRONG_VOLUME);      /* no IO_REMOUNT on NT 3.1 */
-        g_raw_reparse = 0;
-#endif
         T(g_disk->Vpb != old);
         TS(Write(f, 0, 10, g_rbuf, FALSE, &info), EXF_STATUS_DISMOUNTED_T);
         /* back to the original medium before the next mount */
@@ -730,7 +724,6 @@ static void Robustness(void)
         VerifyFile(MGet("/swapped.bin"), 1);
     }
 
-#if !defined(EXF_NT4) && !defined(EXF_NT31)   /* PnP came with Windows 2000 */
     /* surprise removal with dirty data: handles fail, the data is lost, the disk stays consistent */
     PutFile("/gone.bin", 50000);
     TS(Open("", NULL, FILE_GENERIC_READ | FILE_WRITE_DATA, 7, FILE_OPEN, 0, &v), STATUS_SUCCESS);
@@ -751,7 +744,6 @@ static void Robustness(void)
         if (VolumeDirty() == 1) { Unmount(); ClearDirtyOnDisk(); }
         VerifyFile(MGet("/gone.bin"), 1);
     }
-#endif
 
     /* FSCTL_MARK_VOLUME_DIRTY sticks: neither a lock nor a remount clears it */
     TS(Open("", NULL, FILE_GENERIC_READ | FILE_WRITE_DATA, 7, FILE_OPEN, 0, &v), STATUS_SUCCESS);
@@ -809,7 +801,6 @@ static void Robustness(void)
     Unmount();
     PutFile("/after-ro.txt", 100);
 
-#if !defined(EXF_NT4) && !defined(EXF_NT31)   /* PnP came with Windows 2000 */
     /* many handles, then a surprise removal: every close still arrives and the volume goes */
     before = g_devices;
     {
@@ -827,7 +818,6 @@ static void Robustness(void)
         T(g_devices == w_base_dev);
         T(VolumeDirty() == 0);
     }
-#endif
     (void)before;
     Remount();
     VerifyTree(&g_root, 1);
@@ -856,7 +846,7 @@ static void Reformat(void)
     memset(&P, 0, sizeof(P));
     P.SectorSize = g_sector; P.VolumeSectors = (EXU64)g_partlen / g_sector;
     P.ClusterSize = getenv("REFORMAT")[0] ? (EXU32)atoi(getenv("REFORMAT")) : 0;
-    P.Serial = 0x5EED0001; P.LabelLength = 4; P.Label[0] = 'Y'; P.Label[1] = 'e'; P.Label[2] = 'n'; P.Label[3] = 'i';
+    P.Serial = 0x5EED0001; P.LabelLength = 3; P.Label[0] = 'N'; P.Label[1] = 'e'; P.Label[2] = 'w';
     r = ExfmtLayout(&P, &L); T(r == EXFMT_OK); if (r != EXFMT_OK) return;
 
     /* a file still open: the lock is refused, so exfmt /X dismounts first */
@@ -884,7 +874,7 @@ static void Reformat(void)
     while (g_root.child) { MNODE *c = g_root.child; MUnlink(c); MFree(c); }
     TS(OPEN_R("\\", &f), STATUS_SUCCESS); if (!f) return;
     TS(QueryInfo(f, IRP_MJ_QUERY_VOLUME_INFORMATION, FileFsVolumeInformation, &vi, sizeof(vi), &info), STATUS_SUCCESS);
-    ToUtf8(vi.v.VolumeLabel, vi.v.VolumeLabelLength / 2, l); T(!strcmp(l, "Yeni")); T(vi.v.VolumeSerialNumber == 0x5EED0001);
+    ToUtf8(vi.v.VolumeLabel, vi.v.VolumeLabelLength / 2, l); T(!strcmp(l, "New")); T(vi.v.VolumeSerialNumber == 0x5EED0001);
     TS(QueryInfo(f, IRP_MJ_QUERY_VOLUME_INFORMATION, FileFsSizeInformation, &vi, sizeof(vi), &info), STATUS_SUCCESS);
     T(vi.s.TotalAllocationUnits.QuadPart == L.ClusterCount);
     T(vi.s.AvailableAllocationUnits.QuadPart == L.ClusterCount - L.UsedClusters);
@@ -1013,7 +1003,7 @@ static void RandomOp(size_t limit)
         if (n && n->parent != d) n = NULL;
         if (n) strcpy(name, Rand() % 2 ? n->name : n->name);
         else {
-            static const char *pre[] = { "file", "Dosya", "αρχείο", "файл", "Data File", "x" };
+            static const char *pre[] = { "file", "Document", "αρχείο", "файл", "Data File", "x" };
             snprintf(name, sizeof(name), "%s %d%s", pre[Rand() % 6], g_names++, Rand() % 3 ? ".bin" : "");
         }
         MPath(d, path); strcat(path, "/"); strcat(path, name);
@@ -1037,7 +1027,7 @@ static void RandomOp(size_t limit)
 
     if (op < 16) {                                              /* mkdir */
         d = PickNode(&g_root, 1, 0); if (!d || d->delpending) return;
-        snprintf(name, sizeof(name), "%s %d", Rand() % 2 ? "Klasör" : "dir", g_names++);
+        snprintf(name, sizeof(name), "%s %d", Rand() % 2 ? "Folder" : "dir", g_names++);
         MPath(d, path); strcat(path, "/"); strcat(path, name);
         Mkdir(path);
         return;
@@ -1125,7 +1115,7 @@ static void RandomOp(size_t limit)
             char to[1300]; MNODE *clash; int inside = 0; MNODE *w;
             for (w = target; w; w = w->parent) if (w == n) inside = 1;
             if (Rand() % 4 == 0 && target->child) { MNODE *c = PickNode(target, 0, 6); if (c && c->parent == target) strcpy(name, c->name); else snprintf(name, sizeof(name), "renamed %d", g_names++); }
-            else snprintf(name, sizeof(name), "%s %d", Rand() % 2 ? "Taşındı" : "renamed", g_names++);
+            else snprintf(name, sizeof(name), "%s %d", Rand() % 2 ? "Moved" : "renamed", g_names++);
             MPath(target, to); strcat(to, "/"); strcat(to, name);
             clash = MFind(target, name);
             st = Rename(f, to[0] ? to : "/", (BOOLEAN)replace);
@@ -1178,6 +1168,7 @@ static void WriteTests(PDRIVER_OBJECT drv, int base_pool, int base_dev)
     TS(OPEN_R("\\", &f), STATUS_SUCCESS);
     if (f) { TS(QueryInfo(f, IRP_MJ_QUERY_VOLUME_INFORMATION, FileFsSizeInformation, &si, sizeof(si), &info), STATUS_SUCCESS); Close(f); }
     g_cluster = si.SectorsPerAllocationUnit * si.BytesPerSector;
+    if (g_cluster + 65536 > (4 << 20)) { free(g_rbuf); g_rbuf = malloc(g_cluster + 65536); }  /* 32 MB clusters write cluster+100 */
     free0 = FreeClusters();
     Remount();                                                   /* the first mount changed nothing */
 

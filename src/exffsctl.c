@@ -303,9 +303,7 @@ ExfMountVolume (
             VolumeDevice->AlignmentRequirement = TargetDevice->AlignmentRequirement;
         }
 
-#ifndef EXF_NT31
-        VolumeDevice->SectorSize = (USHORT)SectorSize;  /* a spare field on NT 3.1 */
-#endif
+        VolumeDevice->SectorSize = (USHORT)SectorSize;
 
 #ifdef DO_DEVICE_INITIALIZING
         VolumeDevice->Flags &= ~DO_DEVICE_INITIALIZING;
@@ -754,6 +752,21 @@ ExfDismountVolume (
     if (!NT_SUCCESS(Status)) {
         return Status;
     }
+
+    (VOID)ExAcquireResourceExclusiveLite(&Vcb->Resource, TRUE);
+
+    /* An open paging file cannot be dismounted from under the system */
+    {
+        PLIST_ENTRY Entry;
+        for (Entry = Vcb->FcbList.Flink; Entry != &Vcb->FcbList; Entry = Entry->Flink) {
+            PEXF_FCB Fcb = CONTAINING_RECORD(Entry, EXF_FCB, FcbLinks);
+            if ((Fcb->FcbState & FCB_STATE_PAGING_FILE) && Fcb->UncleanCount != 0) {
+                ExfRelease(&Vcb->Resource);
+                return STATUS_ACCESS_DENIED;
+            }
+        }
+    }
+    ExfRelease(&Vcb->Resource);
 
     ExfNotifyVolume(FileObject, FSRTL_VOLUME_DISMOUNT);
 

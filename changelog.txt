@@ -1,0 +1,26 @@
+EXFATNT - Changelog
+
+v1.2.0.0
+Changelog:
+- Fixed exfatnt not starting on Windows NT 3.1 (shown as not started in the Devices control panel, and failing to start by hand there). The driver shipped in bin\ is the universal GCC build and already loaded on NT 3.1; the Visual C++ project (src\NT\build.bat), however, built a driver for NT 3.51 and later - it declared subsystem version 3.51 and did not bind the executive-resource API to the running kernel - so a driver built from it would not start on NT 3.1. build.bat now builds the same universal binary as build/build_cross.sh (subsystem 3.10, EXF_NT31, exfres.c), so both build paths produce a driver that loads on NT 3.1 through 4.0.
+- Large non-cached reads and writes are split into pieces the disk stack accepts (1 MB each) instead of being handed to the disk in one oversized IRP, which could bugcheck on a large volume.
+- Fixed Windows NT 3.1 hanging at "Shutdown in progress" with the disk light stuck on. The shutdown-time flush of the disk's hardware cache waited without a timeout and never returned on NT 3.1; exFAT volumes are written through and already consistent, so that flush is now skipped at shutdown.
+- Added Windows NT 3.1 and 3.5 support. The driver did not load on NT 3.1 (it was shown as not started under Devices): it imported functions NT 3.1's kernel does not have and declared subsystem version 3.51. The new universal exfatnt.sys imports only what NT 3.1 exports and binds the executive-resource, top-level IRP, device-to-verify and change-notify functions to the running kernel at load time; one binary serves NT 3.1 - 4.0.
+- Every ERESOURCE and FILE_LOCK is padded for NT 3.1's larger structures, and the dispatch table is filled only up to the IRP majors NT 3.1 has.
+- Fixed a hang when a program memory-mapped a file and so extended it (CreateFileMapping): setting the size no longer creates a temporary cache map, which deadlocked against the Memory Manager on NT 3.1.
+- Fixed the lazy writer's valid data length update being refused when the file's handle was already closed.
+- Change notification on the universal binary is held pending and completed at cleanup, so File Manager and Explorer never spin.
+- Fixed the ".." entry of folders in the root directory.
+- exfatchk locks a mounted volume for a read-only check too, so the file system writes out what it has cached first; it used to read a stale FAT and directory and report problems that were not there.
+- Added exfinst, an installer that also works on NT 3.1 (whose regedit cannot import .reg files).
+- bin\ now holds the driver and all tools (exfatnt.sys, exfinst.exe, exfmt.exe, exfatchk.exe, exfachk.exe), built with GCC by build/build_cross.sh, all running on NT 3.1 and later.
+
+v1.1.0.0
+Changelog:
+- Added paging file support on exFAT volumes. The run list of a paging file is kept in nonpaged memory, and the Memory Manager can create and size pagefile.sys.
+- A volume with an open paging file can no longer be locked or dismounted.
+- Fixed a buffer in the write test that was too small for 32 MB clusters.
+
+v1.0.0.0
+Changelog:
+- Initial Release.

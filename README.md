@@ -1,12 +1,18 @@
-# EXFATNT - exFAT File System Driver for Windows NT 3.1, 3.50, 3.51, 4.0, Windows 2000 and XP (x86 and x64)
+# EXFATNT - exFAT File System Driver for Windows NT 3.1 - 4.0, Windows 2000 and XP (x86 and x64)
 
-An installable file system (IFS) driver that lets Windows NT 3.1, NT 3.5, NT 3.51, NT 4.0, Windows 2000 and Windows XP before SP2 (x86 and x64) mount exFAT volumes, the format of SDXC cards and most large USB flash drives. Microsoft only ever brought exFAT back as far as Windows XP / Server 2003 (KB955704).
+An installable file system (IFS) driver that lets Windows NT 3.1, 3.5, 3.51, NT 4.0, Windows 2000 and Windows XP before SP2 (x86 and x64) mount exFAT volumes, the format of SDXC cards and most large USB flash drives. Microsoft only ever brought exFAT back as far as Windows XP / Server 2003 (KB955704).
 
 ## Status
 
+**Version 1.2** - read/write, with paging files on exFAT volumes, now on
+Windows NT 3.1 too: one `exfatnt.sys` in `bin\` serves NT 3.1 - 4.0. See
+[changelog.txt](changelog.txt) for what changed.
+
 Files and directories can be created, written, extended, truncated, renamed, moved and deleted; attributes, times and the volume label can be changed. Memory-mapped writes, the fast I/O write path and write-through work. Writing can be turned off in the registry (`EnableWriteSupport`).
 
-Three tools come with it: `exfmt.exe` formats a volume as exFAT, `exfatchk.exe` checks and repairs one, and `exfachk.exe` does the same at boot time for volumes left dirty.
+Four tools come with it: `exfinst.exe` installs the driver, `exfmt.exe` formats a volume as exFAT, `exfatchk.exe` checks and repairs one, and `exfachk.exe` does the same at boot time for volumes left dirty.
+
+**Tested on Windows NT 3.1** (under QEMU): files a Linux system wrote (a large one among them) read back byte for byte, copying, renaming and deleting, the profile API, memory-mapped files, `SetEndOfFile`, attributes and times, `exfmt` and `exfatchk` on a second partition, shutdown with the volume clean; `fsck.exfat` finds the volumes clean afterwards. The same binary passes the same run on NT 3.51 and NT 4.0 (hundreds of system DLLs copied and compared, `exfmt` over a mounted exFAT volume, `exfatchk` on volumes in use).
 
 ## Features
 
@@ -25,18 +31,20 @@ Three tools come with it: `exfmt.exe` formats a volume as exFAT, `exfatchk.exe` 
   - Non-cached I/O and direct volume (DASD) access
   - Directory listing with wildcards (`FileDirectoryInformation`, `FileFullDirectoryInformation`, `FileBothDirectoryInformation`, `FileNamesInformation`); subdirectories report `.` and `..`, the root does not
   - Set information: basic, disposition, rename/move (with replace), allocation, end of file
-  - Change notification, byte-range locks, share access, delete-on-close
+  - Change notification (held pending and completed at cleanup on the universal NT 3.1 - 4.0 binary, which cannot use NT 3.1's notify package; live on the 2000/XP builds), byte-range locks, share access, delete-on-close
+  - Paging files on exFAT volumes: the Memory Manager creates, sizes and grows `pagefile.sys` there; its run list is kept in nonpaged memory, so paging I/O never has to read the FAT, and an existing paging file is opened as it is, never truncated. A paging file in use cannot be deleted or renamed
   - `FSCTL_IS_VOLUME_DIRTY`, `FSCTL_MARK_VOLUME_DIRTY`, flush of files and of the whole volume
-  - Volume lock/unlock/dismount, so `exfmt`, `format` and disk tools can take the volume over; after a dismount with files still open, the next open mounts the volume again
+  - Volume lock/unlock/dismount, so `exfmt`, `format` and disk tools can take the volume over; after a dismount with files still open, the next open mounts the volume again. A volume that holds an open paging file cannot be locked or dismounted
   - Media change verification; removable and hot-plug media are written back when the last file closes
   - Write-protected media and TexFAT volumes are mounted read-only
   - Plug and Play removal on Windows 2000 and XP (query-remove, surprise removal)
-- **Tools** for NT 3.51, NT 4.0, 2000 and XP (see below)
+- **Tools** for NT 3.1 - 4.0, 2000 and XP (see below)
+  - `exfinst.exe`: install and uninstall the driver (also on NT 3.1, whose `regedit` cannot import `.reg` files)
   - `exfmt.exe`: format
   - `exfatchk.exe`: check and repair, like `chkdsk`
   - `exfachk.exe`: the boot-time check, like `autochk`; only volumes marked dirty are checked
 - **One source tree, three binaries**
-  - Windows NT 3.51 / NT 4.0 (x86): `exfatnt.sys` built with `EXF_NT4`
+  - Windows NT 3.1 - 4.0 (x86): `exfatnt.sys` built with `EXF_NT4` (and `EXF_NT31` / `EXF_CROSS` for the universal binary in `bin\`, which binds the executive-resource, top-level-IRP and notify functions to the running kernel at load time)
   - Windows 2000 and XP (x86): `exfatnt.sys` built without it
   - Windows XP x64 (amd64): the same sources, built for amd64
 
@@ -78,18 +86,29 @@ Locks are taken in one order: volume, file (deepest first), file paging I/O, all
 - **src\exfstruc.c** – FCB/CCB management, internal streams, names, time conversion
 - **src\exffast.c** – Fast I/O and Cache Manager callbacks
 - **src\exfmisc.c** – Device control pass-through, byte-range locks
+- **src\exfres.c** – Run-time binding of the kernel functions NT 3.1 lacks or names differently (resources, top-level IRP, device to verify, notify)
 - **src\NT\** – `build.bat` for Windows NT 3.51 and 4.0
+- **build\** – `build_cross.sh`: the universal NT 3.1 - 4.0 driver and all tools with GCC (mingw-w64), no Visual C++
+- **inst\** – `exfinst.exe`
 - **src\2KXP\** – `sources`, `makefile`, `exfatnt.rc` for the WDK (x86 and amd64)
 - **chk\** – `exfatchk.exe` and `exfachk.exe`: `exfchkc.c` checks and repairs (`exfupcw.c` brings in the up-case table of `fmt\`), `exfatchk.c` is the Windows front end, `exfachk.c` the native boot-time one; `NT\build.bat`, `2KXP\sources` and `2KXPBOOT\sources` build them
 - **fmt\** – `exfmt.exe`: `exfmtc.c` lays out and writes the volume, `exfupc.c` holds the up-case table, `exfmt.c` is the Windows front end; `NT\build.bat` and `2KXP\sources` build it
-- **inst\** – `exfinst.exe`, the setup program (copies the driver and the tools, registers the driver); `NT\build.bat` and `2KXP\sources` build it
-- **fmt\exfcrt.c** – The few C library routines the tools use, on kernel32 only, for the Visual C++ 4.x builds that also run on NT 3.1 and 3.5
-- **bin\exfatnt.reg** – Service registration, for installing by hand
+- **bin\** – Ready binaries (below) and `exfatnt.reg`, the service registration
 - **test\** – User-mode test run (Linux)
 
 ## Building
 
-### Windows NT 3.51 and 4.0
+### Windows NT 3.1 - 4.0 with GCC (the binaries in `bin\`)
+
+On Linux with `gcc-mingw-w64-i686`, `binutils` and `python3`:
+
+```
+sh build/build_cross.sh OUTDIR    # exfatnt.sys, exfinst.exe, exfmt.exe, exfatchk.exe, exfachk.exe
+```
+
+The driver is built with `EXF_CROSS` (NT 3.1 import profile, SEH shims for GCC): it imports only functions NT 3.1's ntoskrnl exports (checked when `NT31_EXPORTS` names its export list), declares subsystem version 3.10, fills the dispatch table only up to the IRP majors NT 3.1 has, pads every `ERESOURCE` for NT 3.1's larger one, and is stripped and checksummed for the NT 3.51+ loader. The tools link no C runtime (`build\toolcrt.c`) and import only what NT 3.1's `KERNEL32`, `ADVAPI32` and `NTDLL` export.
+
+### Windows NT 3.51 and 4.0 with Visual C++
 
 Needs Visual C++ 4.x, the Windows NT 4.0 DDK and the free `ntifs.h` (release 58) by Bo Brantén from <http://www.acc.umu.se/~bosse/>, since the NT4 DDK has no `ntifs.h`. An unchanged copy is included as `src\NT\ntifs.h` (GPL v2 or later, see its header).
 
@@ -97,20 +116,6 @@ Needs Visual C++ 4.x, the Windows NT 4.0 DDK and the free `ntifs.h` (release 58)
 2. Run `build.bat` in `src\NT\`.
 
 The same binary is meant for NT 3.51 and 4.0: it only imports kernel functions NT 3.51 already exports, and the 64-bit arithmetic helpers NT 3.51 lacks are linked in from `libcntpr.lib`. It has been tested on NT 3.51.
-
-### Windows NT 3.1 and 3.5
-
-The same tools as for NT 3.51/4.0 (Visual C++ 4.x, the NT4 DDK, `src\NT\ntifs.h`); the NT 3.1 DDK is not needed. Adjust `MSVCDIR` and `DDKDIR` in `src\NT31\build.bat` and run it in `src\NT31\`. The same driver is used on NT 3.1 and NT 3.5.
-
-This builds with `EXF_NT31` (see `src\exfnt31.h`): NT 3.1's original executive resources, untagged pool, fast I/O routines without the DeviceObject argument, and the thread fields NT 3.1 has no routines for, whose offsets the driver reads from the kernel when it loads (it refuses to load on a kernel where they cannot be found). Directory change notification is not offered by this build, and after a media change or a dismount the first open fails and the next one mounts the volume again.
-
-The `-release` link option writes the image checksum: NT 3.1 refuses to load a system-start driver without a valid one (STOP c0000221).
-
-It has been tried on NT 3.1 (3.10.511.1), with `exfinst`, `exfmt`, `exfatchk` and the boot-time `exfachk` on an IDE disk. NT 3.1's own behaviour the tools work around:
-
-- Its `DeviceIoControl` passes on only the file system controls it knows (lock, unlock, dismount); `exfatchk` sends `FSCTL_MARK_VOLUME_DIRTY` through `NtFsControlFile` there.
-- Its partition information has no `PartitionNumber` (`HiddenSectors` is 64 bits); `exfachk` numbers the partitions itself.
-- Its Session Manager runs `autocheck exfachk *` once per drive, with that drive's `\Device\HarddiskN\PartitionM`; `exfachk` then checks only that partition.
 
 ### Windows 2000 and XP (x86 and x64)
 
@@ -126,14 +131,12 @@ For XP x64, open the **Windows Server 2003 x64 Free Build Environment** (or Chec
 
 ### The tools
 
-- **With Visual C++ 4.x** (runs on NT 3.1, NT 3.5, NT 3.51, NT 4.0, 2000 and later): adjust `MSVCDIR` in `fmt\NT\build.bat` and run it in `fmt\NT\`. No DDK needed. These builds do not use the Visual C++ C library, whose start-up code needs kernel32 routines NT 3.1 lacks: `fmt\exfcrt.c` provides the few routines the tools use (`-DEXF_OWN_CRT`), and `libc.lib` is linked only for the compiler's 64-bit arithmetic helpers.
+- **With Visual C++ 4.x** (runs on NT 3.51, NT 4.0, 2000 and later): adjust `MSVCDIR` in `fmt\NT\build.bat` and run it in `fmt\NT\`. No DDK needed.
 - **With the WDK** (runs on 2000 and later): in the Windows 2000 build environment, `cd fmt\2KXP` and `build -cZ`. It uses the system `msvcrt.dll`, since the WDK's static C library needs functions Windows 2000 does not have.
 
-`exfinst.exe` is built the same way from `inst\` (`inst\NT\build.bat`, or `inst\2KXP` with the WDK).
+`exfatchk.exe` and `exfachk.exe` are built the same way from `chk\`: `chk\NT\build.bat` builds both (it also needs the NT4 DDK for `ntdll.lib` and `libcntpr.lib`, because `exfachk.exe` is a native application without a C library), and with the WDK `chk\2KXP` builds `exfatchk.exe` and `chk\2KXPBOOT` builds `exfachk.exe`. The NT 4.0 builds of all three tools also run on 2000 and XP.
 
-`exfatchk.exe` and `exfachk.exe` are built the same way from `chk\`: `chk\NT\build.bat` builds both (it also needs the NT4 DDK for `ntdll.lib` and `libcntpr.lib`, because `exfachk.exe` is a native application without a C library), and with the WDK `chk\2KXP` builds `exfatchk.exe` and `chk\2KXPBOOT` builds `exfachk.exe`. The Visual C++ 4.x builds of all the tools run on every version from NT 3.1 to XP (x86).
-
-On XP x64, use x64 builds of the tools: a 32-bit native `exfachk.exe` cannot run at boot there, and a 32-bit `exfinst` or `exfatchk /INSTALL` refuses to install. Build `fmt\2KXP`, `chk\2KXP`, `chk\2KXPBOOT` and `inst\2KXP` in the Windows Server 2003 x64 build environment; these x64 tool builds have not been tried yet.
+On XP x64, use x64 builds of the tools: a 32-bit native `exfachk.exe` cannot run at boot there, and a 32-bit `exfatchk /INSTALL` refuses to install. Build `fmt\2KXP`, `chk\2KXP` and `chk\2KXPBOOT` in the Windows Server 2003 x64 build environment; these x64 tool builds have not been tried yet.
 
 ## Installing
 
@@ -141,8 +144,7 @@ On XP x64, use x64 builds of the tools: a 32-bit native `exfachk.exe` cannot run
 
 | System | What to use |
 |---|---|
-| Windows NT 3.1, NT 3.5 | `exfatnt.sys` from `src\NT31` |
-| Windows NT 3.51, NT 4.0 | `exfatnt.sys` from `src\NT` |
+| Windows NT 3.1, 3.5, 3.51, NT 4.0 | `bin\exfatnt.sys` (or `src\NT` for NT 3.51 / 4.0) |
 | Windows 2000 | `exfatnt.sys` from `src\2KXP` (x86) |
 | Windows XP without a service pack or with SP1 | `exfatnt.sys` from `src\2KXP` (x86) |
 | Windows XP x64 without SP2 | `exfatnt.sys` from `src\2KXP` (amd64) |
@@ -152,29 +154,39 @@ Do not run EXFATNT and Microsoft's exFAT driver on the same system.
 
 **Service packs:** if the driver does not work on NT 3.51, NT 4.0 or 2000 without the latest service pack (NT 3.51 SP5, NT 4.0 SP6a, 2000 SP4), install that service pack and try again.
 
+### Ready binaries
+
+`bin\` holds the universal driver and the tools, all for NT 3.1 and later (x86, 486-safe, importing only what NT 3.1 has):
+
+| File | What it is |
+|---|---|
+| `exfatnt.sys` | the file system driver, NT 3.1 - 4.0 |
+| `exfinst.exe` | the installer |
+| `exfmt.exe` | format a volume as exFAT |
+| `exfatchk.exe` | check / repair a volume |
+| `exfachk.exe` | the boot-time check |
+| `exfatnt.reg` | the service values, for a manual install |
+
 ### Steps
 
-1. Put `exfinst.exe` in one folder with the `exfatnt.sys` built for the system (see the table) and, optionally, `exfmt.exe`, `exfatchk.exe` and `exfachk.exe`.
-2. Run `exfinst /INSTALL` there (as an administrator).
+With `exfinst` (any NT, NT 3.1 included):
+
+```
+exfinst             copy exfatnt.sys (next to exfinst.exe) to System32\drivers
+                    and create the exfatnt service (system start)
+exfinst /READONLY   the same, volumes mounted read-only
+exfinst /U          uninstall
+```
+
+then restart. `exfinst` refuses to install where Microsoft's `exfat.sys` is present.
+
+By hand:
+
+1. Copy `exfatnt.sys` to `%SystemRoot%\System32\drivers`.
+2. Import `bin\exfatnt.reg` (double-click it, or `regedit /s exfatnt.reg`; not on NT 3.1, use `exfinst` there).
 3. Restart.
 
-```
-EXFINST /INSTALL [/READONLY | /READWRITE] [/NOCHECK]
-EXFINST /UNINSTALL
-
-  /INSTALL    Copies exfatnt.sys to System32\drivers and exfmt.exe,
-              exfatchk.exe, exfachk.exe and exfinst.exe to System32 (those
-              found next to EXFINST), and registers the driver.
-  /READONLY   Mount exFAT volumes read-only (EnableWriteSupport = 0).
-  /READWRITE  Mount them read/write (EnableWriteSupport = 1, the default).
-  /NOCHECK    Do not check dirty exFAT volumes at restart.
-  /UNINSTALL  Disables the driver (Start = 4) and the check at restart.
-              The files stay where they are.
-```
-
-With `exfachk.exe` present, `exfinst` also adds the boot-time check (see Checking). Run again over an installed driver, it renames the files in use to `.old` and puts the new ones in place for the next restart. Nothing needs `regedit`, which cannot import `.reg` files on NT 3.1.
-
-By hand instead: copy `exfatnt.sys` to `%SystemRoot%\System32\drivers`, import `bin\exfatnt.reg` (`regedit /s exfatnt.reg`, NT 3.51 and later) and restart.
+Optionally copy `exfmt.exe` and `exfatchk.exe` to `%SystemRoot%\System32`, and run `exfatchk /INSTALL` from the folder that also holds `exfachk.exe` (see Checking).
 
 ### Settings
 
@@ -233,7 +245,7 @@ What is checked, and what `/F` does about it:
 
 Clusters that nothing refers to are freed; they are not saved into `FOUND.000` files. TexFAT volumes are only checked, not repaired.
 
-`exfachk.exe` is the same check as a native application: `exfinst /INSTALL` (or `exfatchk /INSTALL`) copies it to `System32` and adds `autocheck exfachk *` to `BootExecute` (under `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager`), after Windows' own `autochk`. At every start it reads the boot sector of each partition through the whole-disk device, so no file system gets mounted on the others, and checks and repairs only exFAT volumes whose `VolumeDirty` flag is set (left dirty by a crash, a power loss, a removed disk, or by `exfatchk` asking for a check at restart). Clean volumes are not scanned. `exfachk /p` checks every exFAT volume.
+`exfachk.exe` is the same check as a native application: `exfatchk /INSTALL` copies it to `System32` and adds `autocheck exfachk *` to `BootExecute` (under `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager`), after Windows' own `autochk`. At every start it reads the boot sector of each partition through the whole-disk device, so no file system gets mounted on the others, and checks and repairs only exFAT volumes whose `VolumeDirty` flag is set (left dirty by a crash, a power loss, a removed disk, or by `exfatchk` asking for a check at restart). Clean volumes are not scanned. `exfachk /p` checks every exFAT volume.
 
 ## Limitations
 

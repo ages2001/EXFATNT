@@ -15,14 +15,10 @@
 
 #include <windows.h>
 #include <winioctl.h>
-#ifdef EXF_OWN_CRT
-#include "exfcrt.h"     /* NT build: no C library, runs on NT 3.1 too */
-#else
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#endif
 #include "exfchk.h"
 
 #define BOUNCE_SIZE (256UL * 1024)
@@ -45,45 +41,6 @@ static void Usage(void)
            "  /INSTALL   Check exFAT volumes marked dirty at every restart\n"
            "             (copies exfachk.exe to System32 and adds it to BootExecute).\n"
            "  /UNINSTALL Stop checking at restart.\n");
-}
-
-/*
- * FSCTL_MARK_VOLUME_DIRTY. NT 3.1's DeviceIoControl passes on only the
- * file system controls it knows (lock, unlock, dismount): there the request
- * goes to NtFsControlFile directly.
- */
-typedef LONG (WINAPI *EXF_NT_FS_CONTROL)(HANDLE, HANDLE, PVOID, PVOID, PVOID, ULONG, PVOID, ULONG, PVOID, ULONG);
-typedef ULONG (WINAPI *EXF_STATUS_TO_ERROR)(LONG);
-
-static BOOL MarkDirty(HANDLE Handle)
-{
-    HMODULE Ntdll;
-    EXF_NT_FS_CONTROL FsControl;
-    EXF_STATUS_TO_ERROR ToError;
-    PVOID Iosb[2];                  /* IO_STATUS_BLOCK: two pointer-sized fields */
-    DWORD Bytes;
-    LONG Status;
-
-    if (DeviceIoControl(Handle, FSCTL_MARK_VOLUME_DIRTY, NULL, 0, NULL, 0, &Bytes, NULL)) {
-        return TRUE;
-    }
-    if (GetLastError() != ERROR_INVALID_FUNCTION) {
-        return FALSE;
-    }
-
-    Ntdll = GetModuleHandleA("ntdll.dll");
-    FsControl = Ntdll ? (EXF_NT_FS_CONTROL)GetProcAddress(Ntdll, "NtFsControlFile") : NULL;
-    ToError = Ntdll ? (EXF_STATUS_TO_ERROR)GetProcAddress(Ntdll, "RtlNtStatusToDosError") : NULL;
-    if (FsControl == NULL) {
-        return FALSE;
-    }
-
-    Status = FsControl(Handle, NULL, NULL, NULL, Iosb, FSCTL_MARK_VOLUME_DIRTY, NULL, 0, NULL, 0);
-    if (Status < 0) {
-        SetLastError(ToError ? ToError(Status) : ERROR_INVALID_FUNCTION);
-        return FALSE;
-    }
-    return TRUE;
 }
 
 static void Fail(const char *What)
@@ -269,7 +226,7 @@ int main(int argc, char **argv)
     DISK_GEOMETRY Geometry;
     PARTITION_INFORMATION Partition;
     char Drive = 0, Path[16], WinDir[MAX_PATH], Line[16];
-    int Fix = 0, Force = 0, Verbose = 0, Locked = 0, Status, i;
+    int Fix = 0, Force = 0, Verbose = 0, Locked = 0, ReadLocked = 0, Status, i;
     DWORD Bytes;
     EXU64 Free, Size;
 
@@ -339,11 +296,7 @@ int main(int argc, char **argv)
                     return 3;
                 }
                 CloseHandle(Volume);
-                /* NT 3.1 fails the first open after a dismount while it mounts again */
                 Volume = OpenVolume(Path, 1);
-                if (Volume == INVALID_HANDLE_VALUE) {
-                    Volume = OpenVolume(Path, 1);
-                }
                 if (Volume == INVALID_HANDLE_VALUE) {
                     Fail("Opening the volume");
                     return 3;
@@ -356,9 +309,9 @@ int main(int argc, char **argv)
                        "Check and repair it at the next restart (Y/N)? ", Drive);
                 fflush(stdout);
                 if (fgets(Line, sizeof(Line), stdin) != NULL && (Line[0] == 'y' || Line[0] == 'Y')) {
-                    if (MarkDirty(Volume)) {
+                    if (DeviceIoControl(Volume, FSCTL_MARK_VOLUME_DIRTY, NULL, 0, NULL, 0, &Bytes, NULL)) {
                         printf("%c: will be checked at the next restart", Drive);
-                        printf(" (if exfachk is installed: EXFINST or EXFATCHK /INSTALL).\n");
+                        printf(" (if exfachk is installed: EXFATCHK /INSTALL).\n");
                         CloseHandle(Volume);
                         return 2;
                     }
@@ -370,6 +323,11 @@ int main(int argc, char **argv)
         } else {
             Locked = 1;
         }
+    } else if (DeviceIoControl(Volume, FSCTL_LOCK_VOLUME, NULL, 0, NULL, 0, &Bytes, NULL)) {
+        /* a read-only check of a mounted volume: locking it makes the file
+         * system write out what it has cached (and nothing changes meanwhile);
+         * if files are open it is checked as it is on the disk */
+        ReadLocked = 1;
     }
 
     memset(&Host, 0, sizeof(Host));
@@ -386,6 +344,9 @@ int main(int argc, char **argv)
 
     if (Fix) {
         FlushFileBuffers(Volume);
+    }
+    if (ReadLocked) {
+        DeviceIoControl(Volume, FSCTL_UNLOCK_VOLUME, NULL, 0, NULL, 0, &Bytes, NULL);
     }
     if (Locked) {
         /* After the repair the file system mounts the volume again */

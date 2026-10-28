@@ -110,26 +110,23 @@ ExfSetFileSize (
     Size.QuadPart = NewSize;
 
     if (NewSize < Fcb->Header.FileSize.QuadPart &&
-        !ExfCanFileBeTruncated(&Fcb->SectionObjectPointers, &Size)) {
+        !MmCanFileBeTruncated(&Fcb->SectionObjectPointers, &Size)) {
 
         return STATUS_USER_MAPPED_FILE;
     }
 
     __try {
 
-        /* A mapped file with no cache map still has to hear of the size */
-        if (Fcb->SectionObjectPointers.DataSectionObject != NULL &&
-            Fcb->SectionObjectPointers.SharedCacheMap == NULL &&
-            !(FileObject->Flags & FO_CLEANUP_COMPLETE)) {
-
-            CcInitializeCacheMap(FileObject,
-                                 (PCC_FILE_SIZES)&Fcb->Header.AllocationSize,
-                                 FALSE,
-                                 &ExfData.CacheManagerCallbacks,
-                                 Fcb);
-
-            CacheMapInitialized = TRUE;
-        }
+        /*
+         * A file mapped by Mm but without a cache map is NOT given a temporary
+         * cache map to report the new size: the Memory Manager extends a file
+         * itself while creating a section over it (CreateFileMapping) and
+         * holds the section lock meanwhile, and CcInitializeCacheMap would
+         * wait on it - a deadlock (NT 3.1; and on Windows 2000 a cache map
+         * teardown that needs the file). Mm learns a larger size from the
+         * section itself; pages past a smaller end are purged without a
+         * cache map (ExfShrinkFileSize).
+         */
 
         if (NewSize > Fcb->Header.FileSize.QuadPart) {
 
@@ -632,6 +629,13 @@ ExfCommonSetInformation (
     BOOLEAN FcbAcquired = FALSE;
     NTSTATUS Status;
 
+    /* The lazy writer reporting what reached the disk (possibly through a file
+     * object whose handle is already closed, or an internal stream, so with no
+     * CCB): the entry set is rewritten at cleanup and close anyway */
+    if (Class == FileEndOfFileInformation && IrpSp->Parameters.SetFile.AdvanceOnly) {
+        return STATUS_SUCCESS;
+    }
+
     if (Fcb == NULL || Ccb == NULL) {
         return STATUS_INVALID_PARAMETER;
     }
@@ -675,6 +679,12 @@ ExfCommonSetInformation (
         return STATUS_INVALID_DEVICE_REQUEST;
     }
 
+    /* Mm sizes a paging file (allocation, end of file); nothing else changes it */
+    if ((Fcb->FcbState & FCB_STATE_PAGING_FILE) &&
+        (Class == FileDispositionInformation || Class == FileRenameInformation)) {
+        return STATUS_ACCESS_DENIED;
+    }
+
     (VOID)ExAcquireResourceExclusiveLite(&Vcb->Resource, TRUE);
 
     __try {
@@ -707,13 +717,22 @@ ExfCommonSetInformation (
             break;
 
         case FileAllocationInformation:
-            Status = ExfSetAllocationInfo(Ctx, Vcb, Fcb, FileObject,
-                                          (PFILE_ALLOCATION_INFORMATION)Buffer);
-            break;
-
         case FileEndOfFileInformation:
-            Status = ExfSetEndOfFileInfo(Ctx, Vcb, Fcb, FileObject,
-                                         (PFILE_END_OF_FILE_INFORMATION)Buffer);
+            if (Fcb->FcbState & FCB_STATE_PAGING_FILE) {
+                /* paging I/O looks the runs up meanwhile */
+                (VOID)ExAcquireResourceExclusiveLite(&Fcb->PagingIoResource, TRUE);
+            }
+            if (Class == FileAllocationInformation) {
+                Status = ExfSetAllocationInfo(Ctx, Vcb, Fcb, FileObject,
+                                              (PFILE_ALLOCATION_INFORMATION)Buffer);
+            } else {
+                Status = ExfSetEndOfFileInfo(Ctx, Vcb, Fcb, FileObject,
+                                             (PFILE_END_OF_FILE_INFORMATION)Buffer);
+            }
+            if (Fcb->FcbState & FCB_STATE_PAGING_FILE) {
+                Fcb->Header.ValidDataLength.QuadPart = Fcb->Header.FileSize.QuadPart;
+                ExfRelease(&Fcb->PagingIoResource);
+            }
             break;
 
         default:

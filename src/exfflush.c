@@ -266,16 +266,27 @@ ExfFlushVolume (
         Fcb->FcbState &= ~FCB_STATE_VISITED;
     }
 
+    EXF_DBG((EXF_PFX "flush: files done %x\n", Status));
     Result = ExfFlushMetadata(Vcb);
+    EXF_DBG((EXF_PFX "flush: metadata %x\n", Result));
     if (NT_SUCCESS(Status)) {
         Status = Result;
     }
 
     if (MarkClean && NT_SUCCESS(Status)) {
         Status = ExfMarkVolumeClean(Vcb);
+        EXF_DBG((EXF_PFX "flush: clean %x\n", Status));
     }
 
-    (VOID)ExfFlushDevice(Vcb);
+    /* The disk hardware cache-flush is skipped during shutdown (see
+     * ExfCommonShutdown): there it can wait forever on a disk stack that is
+     * already going down - the "Shutdown in progress" hang with the disk light
+     * stuck on. Data and metadata are written through and the disk class driver
+     * flushes the hardware cache with its own shutdown request. */
+    if (!ExfData.ShuttingDown) {
+        (VOID)ExfFlushDevice(Vcb);
+        EXF_DBG((EXF_PFX "flush: device done\n"));
+    }
 
     return Status;
 }
@@ -345,6 +356,12 @@ ExfCommonShutdown (
 
     UNREFERENCED_PARAMETER(Ctx);
 
+    /* Skip the disk cache-flush from here on: at shutdown the disk stack may be
+     * stopping and that flush waits on it with no timeout - the "Shutdown in
+     * progress" hang with the disk light stuck on. Writes are write-through and
+     * the disk flushes its own hardware cache at shutdown. */
+    ExfData.ShuttingDown = TRUE;
+
     (VOID)ExAcquireResourceSharedLite(&ExfData.Resource, TRUE);
 
     __try {
@@ -353,7 +370,9 @@ ExfCommonShutdown (
 
             Vcb = CONTAINING_RECORD(Entry, EXF_VCB, VcbLinks);
 
+            EXF_DBG((EXF_PFX "shutdown: vcb %x state %x\n", Vcb, Vcb->VcbState));
             (VOID)ExAcquireResourceExclusiveLite(&Vcb->Resource, TRUE);
+            EXF_DBG((EXF_PFX "shutdown: acquired\n"));
 
             if ((Vcb->VcbState & VCB_STATE_MOUNTED) && !(Vcb->VcbState & VCB_STATE_SHUTDOWN)) {
                 (VOID)ExfFlushVolume(Vcb, TRUE);

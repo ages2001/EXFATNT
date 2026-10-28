@@ -240,7 +240,14 @@ ExfOpenFcb (
     FileObject->SectionObjectPointer = &Fcb->SectionObjectPointers;
     FileObject->Vpb = Vcb->Vpb;
 
-    if (!(FileObject->Flags & FO_NO_INTERMEDIATE_BUFFERING)) {
+    if (Ctx->IrpSp->Flags & SL_OPEN_PAGING_FILE) {
+        /* Mm owns a paging file's data: all of it counts as valid */
+        Fcb->FcbState |= FCB_STATE_PAGING_FILE;
+        Fcb->Header.ValidDataLength.QuadPart = Fcb->Header.FileSize.QuadPart;
+    }
+
+    if (!(FileObject->Flags & FO_NO_INTERMEDIATE_BUFFERING) &&
+        !(Fcb->FcbState & FCB_STATE_PAGING_FILE)) {
         FileObject->Flags |= FO_CACHE_SUPPORTED;
     }
 
@@ -309,7 +316,7 @@ ExfOverwriteFile (
 
     Zero.QuadPart = 0;
 
-    if (!ExfCanFileBeTruncated(&Fcb->SectionObjectPointers, &Zero)) {
+    if (!MmCanFileBeTruncated(&Fcb->SectionObjectPointers, &Zero)) {
         return STATUS_USER_MAPPED_FILE;
     }
 
@@ -542,8 +549,20 @@ ExfCommonCreate (
         }
 
         if (IrpSp->Flags & SL_OPEN_PAGING_FILE) {
-            Status = STATUS_ACCESS_DENIED;
-            __leave;
+
+            if (CreateOptions & FILE_DIRECTORY_FILE) {
+                Status = STATUS_ACCESS_DENIED;
+                __leave;
+            }
+
+            /* An existing paging file is opened as it is (Mm sizes it); a
+               missing one is still created */
+            if (CreateDisposition == FILE_SUPERSEDE || CreateDisposition == FILE_OVERWRITE_IF ||
+                CreateDisposition == FILE_OPEN_IF) {
+                CreateDisposition = FILE_OPEN_IF;
+            } else if (CreateDisposition == FILE_OVERWRITE) {
+                CreateDisposition = FILE_OPEN;
+            }
         }
 
         if (CreateOptions & FILE_OPEN_BY_FILE_ID) {

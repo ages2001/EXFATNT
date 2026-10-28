@@ -354,9 +354,12 @@ ExfCommonCleanup (
 
             if (ExfIsDcb(Fcb)) {
                 FsRtlNotifyCleanup(Vcb->NotifySync, &Vcb->DirNotifyList, Ccb);
+#ifdef EXF_NT31
+                ExfNotifyCleanupList(Vcb, Ccb);
+#endif
             } else {
                 FsRtlFastUnlockAll(&Fcb->FileLock, FileObject,
-                                   ExfRequestorProcess(Ctx->Irp), NULL);
+                                   IoGetRequestorProcess(Ctx->Irp), NULL);
             }
 
             if (Ccb->Flags & CCB_FLAG_DELETE_ON_CLOSE) {

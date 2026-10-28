@@ -43,7 +43,8 @@ ExfAppendRun (
 
         NewMax = RunList->RunMax ? RunList->RunMax * 2 : 4;
 
-        NewRuns = (PEXF_RUN)ExAllocatePoolWithTag(PagedPool, NewMax * sizeof(EXF_RUN), EXF_TAG_RUNS);
+        /* nonpaged: a paging file's runs are looked up by paging I/O */
+        NewRuns = (PEXF_RUN)ExAllocatePoolWithTag(NonPagedPool, NewMax * sizeof(EXF_RUN), EXF_TAG_RUNS);
         if (NewRuns == NULL) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -82,7 +83,7 @@ ExfReserveRuns (
 
     NewMax = RunList->RunCount + Extra + 4;
 
-    NewRuns = (PEXF_RUN)ExAllocatePoolWithTag(PagedPool, NewMax * sizeof(EXF_RUN), EXF_TAG_RUNS);
+    NewRuns = (PEXF_RUN)ExAllocatePoolWithTag(NonPagedPool, NewMax * sizeof(EXF_RUN), EXF_TAG_RUNS);
     if (NewRuns == NULL) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }

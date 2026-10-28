@@ -223,8 +223,6 @@ ExfPerformVerify (
     /* A different volume is in the drive: have the create reparsed */
     FileObject = Ctx->IrpSp->FileObject;
 
-#ifndef EXF_NT31
-    /* NT 3.1 has no IO_REMOUNT: the open fails and is retried by the caller */
     if (Ctx->IrpSp->MajorFunction == IRP_MJ_CREATE &&
         FileObject != NULL &&
         FileObject->RelatedFileObject == NULL &&
@@ -234,9 +232,6 @@ ExfPerformVerify (
         Ctx->Irp->IoStatus.Information = IO_REMOUNT;
         return STATUS_REPARSE;
     }
-#else
-    UNREFERENCED_PARAMETER(FileObject);
-#endif
 
     return Status;
 }
@@ -273,6 +268,20 @@ ExfFsdDispatch (
     if (TopLevel) {
         Ctx.Flags |= EXF_CTX_TOP_LEVEL;
     }
+
+#ifdef EXF_DBGPORT
+    EXF_DBG(("[IRP %x.%x fo=%x fl=%x", Ctx.IrpSp->MajorFunction, Ctx.IrpSp->MinorFunction,
+             Ctx.IrpSp->FileObject, Irp->Flags));
+    if (Ctx.IrpSp->MajorFunction == IRP_MJ_CREATE && Ctx.IrpSp->FileObject)
+        EXF_DBG((" '%wZ' opt=%x", &Ctx.IrpSp->FileObject->FileName, Ctx.IrpSp->Parameters.Create.Options));
+    if (Ctx.IrpSp->MajorFunction == IRP_MJ_READ || Ctx.IrpSp->MajorFunction == IRP_MJ_WRITE)
+        EXF_DBG((" off=%x len=%x", Ctx.IrpSp->Parameters.Read.ByteOffset.LowPart, Ctx.IrpSp->Parameters.Read.Length));
+    if (Ctx.IrpSp->MajorFunction == IRP_MJ_QUERY_INFORMATION || Ctx.IrpSp->MajorFunction == IRP_MJ_SET_INFORMATION)
+        EXF_DBG((" cls=%u", Ctx.IrpSp->Parameters.QueryFile.FileInformationClass));
+    if (Ctx.IrpSp->MajorFunction == IRP_MJ_FILE_SYSTEM_CONTROL || Ctx.IrpSp->MajorFunction == IRP_MJ_LOCK_CONTROL)
+        EXF_DBG((" code=%x", Ctx.IrpSp->Parameters.DeviceIoControl.IoControlCode));
+    EXF_DBG(("]\n"));
+#endif
 
     for (;;) {
 
@@ -311,6 +320,10 @@ ExfFsdDispatch (
     if (TopLevel) {
         IoSetTopLevelIrp(NULL);
     }
+
+#ifdef EXF_DBGPORT
+    EXF_DBG(("[END %x.%x st=%x]\n", Ctx.IrpSp->MajorFunction, Ctx.IrpSp->MinorFunction, Status));
+#endif
 
     FsRtlExitFileSystem();
 

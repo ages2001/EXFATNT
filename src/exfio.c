@@ -636,6 +636,9 @@ ExfNonCachedIo (
         if (Length > Contiguous) {
             Length = Contiguous;
         }
+        if (Length > EXF_MAX_TRANSFER) {
+            Length = EXF_MAX_TRANSFER;   /* never hand the disk stack an oversized IRP */
+        }
 
         Status = ExfTransferRun(Vcb, MajorFunction, Irp, Offset, Lbo, Length);
 

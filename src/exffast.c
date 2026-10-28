@@ -9,7 +9,7 @@ ExfIsFastIoPossible (
     PEXF_FCB Fcb
     )
 {
-    if (Fcb->Vcb->VcbState & VCB_STATE_DISMOUNTED) {
+    if ((Fcb->Vcb->VcbState & VCB_STATE_DISMOUNTED) || (Fcb->FcbState & FCB_STATE_PAGING_FILE)) {
         return FastIoIsNotPossible;
     }
 
@@ -153,8 +153,6 @@ ExfFastQueryStandardInfo (
     return TRUE;
 }
 
-#ifndef EXF_NT31     /* no such fast I/O routine on NT 3.1 */
-
 static BOOLEAN
 NTAPI
 ExfFastQueryNetworkOpenInfo (
@@ -193,70 +191,6 @@ ExfFastQueryNetworkOpenInfo (
     return TRUE;
 }
 
-#endif
-
-#ifdef EXF_NT31
-
-/* NT 3.1 calls fast I/O routines without the DeviceObject argument */
-
-static BOOLEAN
-NTAPI
-Exf31FastIoCheckIfPossible (
-    PFILE_OBJECT FileObject,
-    PLARGE_INTEGER FileOffset,
-    ULONG Length,
-    BOOLEAN Wait,
-    ULONG LockKey,
-    BOOLEAN CheckForReadOperation,
-    PIO_STATUS_BLOCK IoStatus
-    )
-{
-    return ExfFastIoCheckIfPossible(FileObject, FileOffset, Length, Wait, LockKey,
-                                    CheckForReadOperation, IoStatus, NULL);
-}
-
-static BOOLEAN
-NTAPI
-Exf31FastQueryBasicInfo (
-    PFILE_OBJECT FileObject,
-    BOOLEAN Wait,
-    PFILE_BASIC_INFORMATION Buffer,
-    PIO_STATUS_BLOCK IoStatus
-    )
-{
-    return ExfFastQueryBasicInfo(FileObject, Wait, Buffer, IoStatus, NULL);
-}
-
-static BOOLEAN
-NTAPI
-Exf31FastQueryStandardInfo (
-    PFILE_OBJECT FileObject,
-    BOOLEAN Wait,
-    PFILE_STANDARD_INFORMATION Buffer,
-    PIO_STATUS_BLOCK IoStatus
-    )
-{
-    return ExfFastQueryStandardInfo(FileObject, Wait, Buffer, IoStatus, NULL);
-}
-
-VOID
-ExfInitializeFastIo (
-    PFAST_IO_DISPATCH FastIo
-    )
-{
-    RtlZeroMemory(FastIo, sizeof(FAST_IO_DISPATCH));
-
-    /* The NT 3.1 table: the size and ten routines, up to FastIoDeviceControl */
-    FastIo->SizeOfFastIoDispatch = sizeof(ULONG) + 10 * sizeof(PVOID);
-    FastIo->FastIoCheckIfPossible = (PFAST_IO_CHECK_IF_POSSIBLE)Exf31FastIoCheckIfPossible;
-    FastIo->FastIoRead = (PFAST_IO_READ)EXF31_COPY_READ;    /* NT 3.1's own takes 7 arguments too */
-    FastIo->FastIoWrite = (PFAST_IO_WRITE)EXF31_COPY_WRITE;
-    FastIo->FastIoQueryBasicInfo = (PFAST_IO_QUERY_BASIC_INFO)Exf31FastQueryBasicInfo;
-    FastIo->FastIoQueryStandardInfo = (PFAST_IO_QUERY_STANDARD_INFO)Exf31FastQueryStandardInfo;
-}
-
-#else
-
 VOID
 ExfInitializeFastIo (
     PFAST_IO_DISPATCH FastIo
@@ -272,8 +206,6 @@ ExfInitializeFastIo (
     FastIo->FastIoQueryStandardInfo = ExfFastQueryStandardInfo;
     FastIo->FastIoQueryNetworkOpenInfo = ExfFastQueryNetworkOpenInfo;
 }
-
-#endif
 
 /* ------------------------------------------------------------------ */
 /* Cache manager callbacks                                             */

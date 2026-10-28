@@ -256,7 +256,8 @@ ExfPagingWrite (
 
         End = StartingVbo + ByteCount;
 
-        if (End > ValidData) {
+        /* A paging file is Mm's: no zeroing, no valid data to move */
+        if (End > ValidData && !(Fcb->FcbState & FCB_STATE_PAGING_FILE)) {
 
             if (Fcb->LazyWriteThread == KeGetCurrentThread()) {
 

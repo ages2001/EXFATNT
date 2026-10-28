@@ -486,8 +486,9 @@ ExfQueryDirectory (
 
             } else if (Ccb->QueryState == 1) {
 
-                /* The root has no times of its own: below it, ".." shows the directory's */
-                ExfListFromFcb(Dcb->ParentDcb->ParentDcb != NULL ? Dcb->ParentDcb : Dcb,
+                /* the root keeps no times: ".." of its subdirectories shows the
+                   directory's own */
+                ExfListFromFcb((Dcb->ParentDcb->FcbState & FCB_STATE_ROOT) ? Dcb : Dcb->ParentDcb,
                                &List, L"..", 2 * sizeof(WCHAR), 1);
                 Ccb->QueryState = 2;
 
@@ -568,6 +569,73 @@ ExfQueryDirectory (
 /* IRP_MN_NOTIFY_CHANGE_DIRECTORY                                      */
 /* ------------------------------------------------------------------ */
 
+#ifdef EXF_NT31
+
+/*
+ * Without the FsRtlNotifyFull package (NT 3.1) a notify request is held
+ * pending on the volume's list and completed when its handle is cleaned up
+ * or it is cancelled. Completing it at once would make the caller (File
+ * Manager) re-read the directory and re-arm the request in a tight loop.
+ */
+static VOID NTAPI
+ExfCancelNotifyIrp (
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+    )
+{
+    (void)DeviceObject;
+
+    RemoveEntryList(&Irp->Tail.Overlay.ListEntry);
+    IoReleaseCancelSpinLock(Irp->CancelIrql);
+
+    Irp->IoStatus.Status = STATUS_CANCELLED;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+}
+
+/* Completes the held requests of Ccb (NULL: all of them) */
+VOID
+ExfNotifyCleanupList (
+    PEXF_VCB Vcb,
+    PEXF_CCB Ccb
+    )
+{
+    KIRQL Irql;
+    LIST_ENTRY Done;
+    PLIST_ENTRY Entry;
+
+    if (ExfLiveNotify() || Vcb->DirNotifyList.Flink == NULL) {
+        return;
+    }
+
+    InitializeListHead(&Done);
+
+    IoAcquireCancelSpinLock(&Irql);
+    for (Entry = Vcb->DirNotifyList.Flink; Entry != &Vcb->DirNotifyList; ) {
+        PIRP Nirp = CONTAINING_RECORD(Entry, IRP, Tail.Overlay.ListEntry);
+        PLIST_ENTRY Next = Entry->Flink;
+        PIO_STACK_LOCATION Nsp = IoGetCurrentIrpStackLocation(Nirp);
+
+        if (Ccb == NULL || Nsp->FileObject->FsContext2 == Ccb) {
+            Nirp->CancelRoutine = NULL;
+            RemoveEntryList(Entry);
+            InsertTailList(&Done, Entry);
+        }
+        Entry = Next;
+    }
+    IoReleaseCancelSpinLock(Irql);
+
+    while (!IsListEmpty(&Done)) {
+        PLIST_ENTRY E = RemoveHeadList(&Done);
+        PIRP Nirp = CONTAINING_RECORD(E, IRP, Tail.Overlay.ListEntry);
+        Nirp->IoStatus.Status = STATUS_NOTIFY_CLEANUP;
+        Nirp->IoStatus.Information = 0;
+        IoCompleteRequest(Nirp, IO_NO_INCREMENT);
+    }
+}
+
+#endif /* EXF_NT31 */
+
 static NTSTATUS
 ExfNotifyChangeDirectory (
     PEXF_IRP_CONTEXT Ctx,
@@ -578,14 +646,11 @@ ExfNotifyChangeDirectory (
     PEXF_VCB Vcb = Dcb->Vcb;
     PIO_STACK_LOCATION IrpSp = Ctx->IrpSp;
     NTSTATUS Status;
-
 #ifdef EXF_NT31
-    /* The NT 3.1 FsRtl notify package predates the one used here */
-    UNREFERENCED_PARAMETER(Vcb);
-    UNREFERENCED_PARAMETER(IrpSp);
-    UNREFERENCED_PARAMETER(Ccb);
-    Status = STATUS_INVALID_DEVICE_REQUEST;
-#else
+    KIRQL Irql;
+    BOOLEAN Cancelled = FALSE;
+#endif
+
     (VOID)ExAcquireResourceExclusiveLite(&Vcb->Resource, TRUE);
 
     __try {
@@ -594,6 +659,24 @@ ExfNotifyChangeDirectory (
         if (!NT_SUCCESS(Status)) {
             __leave;
         }
+
+#ifdef EXF_NT31
+        if (!ExfLiveNotify()) {
+            IoMarkIrpPending(Ctx->Irp);
+            IoAcquireCancelSpinLock(&Irql);
+            if (Ctx->Irp->Cancel) {
+                IoReleaseCancelSpinLock(Irql);
+                Cancelled = TRUE;
+            } else {
+                InsertTailList(&Vcb->DirNotifyList, &Ctx->Irp->Tail.Overlay.ListEntry);
+                Ctx->Irp->CancelRoutine = ExfCancelNotifyIrp;
+                IoReleaseCancelSpinLock(Irql);
+            }
+            Ctx->Flags |= EXF_CTX_NO_COMPLETE;
+            Status = STATUS_PENDING;
+            __leave;
+        }
+#endif
 
         Status = ExfBuildFullName(Dcb);
         if (!NT_SUCCESS(Status)) {
@@ -619,7 +702,14 @@ ExfNotifyChangeDirectory (
         ExfRelease(&Vcb->Resource);
     }
 
+#ifdef EXF_NT31
+    if (Cancelled) {
+        Ctx->Irp->IoStatus.Status = STATUS_CANCELLED;
+        Ctx->Irp->IoStatus.Information = 0;
+        IoCompleteRequest(Ctx->Irp, IO_NO_INCREMENT);
+    }
 #endif
+
     return Status;
 }
 
